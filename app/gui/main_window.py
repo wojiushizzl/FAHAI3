@@ -6,9 +6,10 @@
 """
 
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QMenuBar, QStatusBar, QToolBar, QSplitter, QFileDialog)
-from PyQt6.QtCore import Qt, pyqtSignal
+                             QMenuBar, QStatusBar, QToolBar, QSplitter, QFileDialog, QLabel, QProgressBar)
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QIcon, QKeySequence, QAction
+import os, json
 
 from .enhanced_flow_canvas import EnhancedFlowCanvas
 from app.pipeline.pipeline_executor import PipelineExecutor, ExecutionMode, PipelineStatus
@@ -36,13 +37,41 @@ class MainWindow(QMainWindow):
         self._current_pipeline_path: str | None = None  # 当前项目文件路径（用于 Ctrl+S 直接保存）
         self._last_save_ts: float = 0.0  # 保存节流时间戳
         self._save_min_interval_ms: int = 500  # 最小间隔
-        
+        # 最近项目记录文件 (放在当前工作目录，可根据需要迁移到用户家目录)
+        self._last_project_meta_path = os.path.join(os.getcwd(), "last_project.json")
+
         # 初始化UI组件
         self._init_ui()
         self._init_menu()
         self._init_toolbar()
         self._init_statusbar()
         self._connect_signals()
+        # 延迟热加载上次项目，避免启动时卡顿（showEvent 中 singleShot 调用）
+        self._auto_load_scheduled = False
+        # 状态栏扩展：系统信息 & 性能信息
+        self._sysinfo_timer = QTimer(self)
+        self._sysinfo_timer.setInterval(1500)  # 1.5s 更新
+        self._sysinfo_timer.timeout.connect(self._update_system_info)
+        self._sysinfo_timer.start()
+        self._metrics_timer = QTimer(self)
+        self._metrics_timer.setInterval(1200)  # 1.2s 更新执行器性能（冗余防止与系统信息同时刷新卡顿）
+        self._metrics_timer.timeout.connect(self._refresh_executor_metrics)
+        self._metrics_timer.start()
+        self._last_metrics_snapshot = {}
+        # GPU 初始化 (pynvml)
+        self._gpu_available = False
+        self._pynvml = None
+        self._gpu_handle = None
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            count = pynvml.nvmlDeviceGetCount()
+            if count > 0:
+                self._gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                self._pynvml = pynvml
+                self._gpu_available = True
+        except Exception:
+            self._gpu_available = False
         
     def _init_ui(self):
         """初始化用户界面"""
@@ -231,6 +260,27 @@ class MainWindow(QMainWindow):
         """初始化状态栏"""
         self.statusbar = self.statusBar()
         self.statusbar.showMessage('就绪')
+        # 右侧系统信息标签 + 进度条
+        self.cpu_bar = QProgressBar()
+        self.cpu_bar.setRange(0,100)
+        self.cpu_bar.setFixedWidth(80)
+        self.cpu_bar.setTextVisible(False)
+        self.cpu_bar.setStyleSheet("QProgressBar { border:1px solid #bbb; background:#eee; } QProgressBar::chunk { background:#4caf50; }")
+        self.gpu_bar = QProgressBar()
+        self.gpu_bar.setRange(0,100)
+        self.gpu_bar.setFixedWidth(80)
+        self.gpu_bar.setTextVisible(False)
+        self.gpu_bar.setStyleSheet("QProgressBar { border:1px solid #bbb; background:#eee; } QProgressBar::chunk { background:#2196f3; }")
+        self.sysinfo_label = QLabel("CPU: --% | GPU: --")
+        self.sysinfo_label.setStyleSheet("QLabel { color: #555; padding-left:6px; }")
+        self.metrics_label = QLabel("Exec: 0 | Avg: 0ms | Slow: -")
+        self.metrics_label.setStyleSheet("QLabel { color:#444; padding-left:12px; }")
+        self.statusbar.addPermanentWidget(self.metrics_label)
+        self.statusbar.addPermanentWidget(QLabel("CPU"))
+        self.statusbar.addPermanentWidget(self.cpu_bar)
+        self.statusbar.addPermanentWidget(QLabel("GPU"))
+        self.statusbar.addPermanentWidget(self.gpu_bar)
+        self.statusbar.addPermanentWidget(self.sysinfo_label)
         
     def _connect_signals(self):
         """连接信号和槽"""
@@ -253,6 +303,7 @@ class MainWindow(QMainWindow):
         if ok:
             self.statusbar.showMessage(f'加载成功: {path}')
             self._current_pipeline_path = path
+            self._persist_last_project(path)
         else:
             self.statusbar.showMessage('加载失败')
         
@@ -270,6 +321,7 @@ class MainWindow(QMainWindow):
         ok = self.flow_canvas.save_to_file(self._current_pipeline_path)
         if ok:
             self.statusbar.showMessage(f'保存成功: {self._current_pipeline_path}')
+            self._persist_last_project(self._current_pipeline_path)
         else:
             self.statusbar.showMessage('保存失败')
         
@@ -281,6 +333,7 @@ class MainWindow(QMainWindow):
         if ok:
             self._current_pipeline_path = path
             self._last_save_ts = time.time()*1000.0  # 更新节流时间戳
+            self._persist_last_project(path)
         self.statusbar.showMessage('另存为成功' if ok else '另存为失败')
         
     def _undo(self):
@@ -334,6 +387,8 @@ class MainWindow(QMainWindow):
         self.pipeline_executor.add_error_callback(self._on_executor_error)
         # 模块执行步骤回调（用于画布高亮）
         self.pipeline_executor.add_module_step_callback(self._on_executor_module_step)
+        # 性能指标回调（冗余保障：即使定时器刷新，仍在有新数据时立即更新缓存）
+        self.pipeline_executor.add_metrics_callback(self._on_executor_metrics)
         # 启动执行器，传入初始空输入
         started = self.pipeline_executor.start(input_data={})
         if not started:
@@ -358,6 +413,7 @@ class MainWindow(QMainWindow):
         exec_once.add_module_step_callback(self._on_executor_module_step)
         exec_once.add_result_callback(lambda r: self.statusbar.showMessage(f'单次结果: {list(r.keys())[:5]}'))
         exec_once.add_error_callback(lambda e: self.statusbar.showMessage(f'单次执行错误: {e}'))
+        exec_once.add_metrics_callback(lambda nodes, agg: self._cache_metrics_snapshot(nodes, agg))
         result = exec_once.run_once(input_data={})
         if result is None:
             if exec_once.status == PipelineStatus.ERROR:
@@ -461,3 +517,160 @@ class MainWindow(QMainWindow):
         """窗口关闭事件"""
         # TODO: 在关闭前询问是否保存项目
         event.accept()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 首次显示后延迟加载最近项目
+        if not self._auto_load_scheduled:
+            self._auto_load_scheduled = True
+            from PyQt6.QtCore import QTimer
+            self.statusbar.showMessage('正在准备热加载上次项目...')
+            QTimer.singleShot(400, self._auto_load_last_project)
+
+    # ---------- 系统信息更新 ----------
+    def _update_system_info(self):
+        cpu_percent = None
+        gpu_mem_percent = None
+        gpu_txt = 'None'
+        cpu_txt = 'n/a'
+        # CPU
+        try:
+            import psutil
+            cpu_percent = psutil.cpu_percent(interval=0)
+            cpu_txt = f"{cpu_percent:.0f}%"
+        except Exception:
+            cpu_percent = None
+        # GPU - 优先 pynvml 全局显存与利用率
+        if self._gpu_available and self._pynvml and self._gpu_handle:
+            try:
+                mem_info = self._pynvml.nvmlDeviceGetMemoryInfo(self._gpu_handle)
+                util_info = self._pynvml.nvmlDeviceGetUtilizationRates(self._gpu_handle)
+                used_mb = mem_info.used / 1024**2
+                total_mb = mem_info.total / 1024**2
+                gpu_mem_percent = (mem_info.used / mem_info.total) * 100.0 if mem_info.total else 0.0
+                gpu_txt = f"{used_mb:.0f}/{total_mb:.0f}MB {util_info.gpu}%"
+            except Exception:
+                gpu_mem_percent = None
+        else:
+            # 回退 torch (仅显示本进程分配，不是全局)
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    props = torch.cuda.get_device_properties(0)
+                    total_mb = props.total_memory / 1024**2
+                    used_mb = torch.cuda.memory_allocated(0) / 1024**2
+                    gpu_mem_percent = (used_mb/total_mb)*100.0 if total_mb else 0.0
+                    name = torch.cuda.get_device_name(0)
+                    gpu_txt = f"{name} {used_mb:.0f}/{total_mb:.0f}MB"
+            except Exception:
+                gpu_mem_percent = None
+        # 更新进度条
+        if cpu_percent is not None:
+            self.cpu_bar.setValue(int(cpu_percent))
+        else:
+            self.cpu_bar.setValue(0)
+        if gpu_mem_percent is not None:
+            self.gpu_bar.setValue(int(gpu_mem_percent))
+            self.gpu_bar.setEnabled(True)
+        else:
+            self.gpu_bar.setValue(0)
+            self.gpu_bar.setEnabled(False)
+        self.sysinfo_label.setText(f"CPU: {cpu_txt} | GPU: {gpu_txt}")
+
+    # ---------- 性能指标刷新 ----------
+    def _on_executor_metrics(self, nodes: dict, aggregate: dict):
+        self._cache_metrics_snapshot(nodes, aggregate)
+        self._apply_metrics_display()
+
+    def _cache_metrics_snapshot(self, nodes: dict, aggregate: dict):
+        # 计算最慢模块（按 avg_time 或 last_time）
+        slow_mod = '-'
+        slow_time_ms = 0.0
+        try:
+            if nodes:
+                # 优先使用 avg_time 判断整体慢；若 avg 相近使用 max
+                sorted_nodes = sorted(nodes.items(), key=lambda kv: kv[1].get('avg_time', 0), reverse=True)
+                nid, stat = sorted_nodes[0]
+                slow_mod = nid
+                slow_time_ms = stat.get('avg_time', 0.0) * 1000.0
+        except Exception:
+            pass
+        snap = {
+            'execs': aggregate.get('total_execs', 0),
+            'total_time': aggregate.get('total_time', 0.0),
+            'modules': aggregate.get('modules_profiled', 0),
+            'slow_mod': slow_mod,
+            'slow_ms': slow_time_ms
+        }
+        # 平均耗时（总时间 / 总执行次数）
+        if snap['execs'] > 0:
+            snap['avg_ms'] = (snap['total_time'] / snap['execs']) * 1000.0
+        else:
+            snap['avg_ms'] = 0.0
+        self._last_metrics_snapshot = snap
+
+    def _apply_metrics_display(self):
+        if not self._last_metrics_snapshot:
+            return
+        s = self._last_metrics_snapshot
+        self.metrics_label.setText(
+            f"Exec: {s['execs']} | Avg: {s['avg_ms']:.1f}ms | Slow: {s['slow_mod']} {s['slow_ms']:.1f}ms"
+        )
+
+    def _refresh_executor_metrics(self):
+        # 若执行器存在，主动抓取最新 metrics
+        if self.pipeline_executor:
+            try:
+                data = self.pipeline_executor.get_metrics()
+                self._cache_metrics_snapshot(data['nodes'], data['aggregate'])
+            except Exception:
+                pass
+        self._apply_metrics_display()
+
+    def reset_executor_metrics(self):
+        if self.pipeline_executor:
+            try:
+                self.pipeline_executor.reset_metrics()
+            except Exception:
+                pass
+        self._last_metrics_snapshot = {}
+        self.metrics_label.setText("Exec: 0 | Avg: 0ms | Slow: -")
+
+    # ---------- 最近项目自动加载/保存 ----------
+    def _persist_last_project(self, path: str):
+        """记录最近打开的项目路径到元数据文件"""
+        try:
+            data = {"pipeline_path": path, "ts": time.time()}
+            with open(self._last_project_meta_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            # 非致命错误，仅状态栏提示
+            self.statusbar.showMessage(f'记录最近项目失败: {e}')
+
+    def _auto_load_last_project(self):
+        """尝试自动加载最近记录的项目，如果存在且未显式指定新项目。"""
+        if self._current_pipeline_path:  # 已有当前路径时不自动加载
+            return
+        if not os.path.exists(self._last_project_meta_path):
+            return
+        try:
+            with open(self._last_project_meta_path, 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+            recent_path = meta.get('pipeline_path')
+            if recent_path and os.path.exists(recent_path) and recent_path.lower().endswith('.json'):
+                # 使用增量加载，缓解启动卡顿
+                def _progress(done, total):
+                    self.statusbar.showMessage(f'热加载进度: {done}/{total} 模块')
+                def _finished(ok):
+                    if ok:
+                        self._current_pipeline_path = recent_path
+                        self.statusbar.showMessage(f'热加载完成: {recent_path}')
+                    else:
+                        self.statusbar.showMessage('热加载失败')
+                if hasattr(self.flow_canvas, 'load_from_file_incremental'):
+                    self.flow_canvas.load_from_file_incremental(recent_path, batch_size=8, progress_cb=_progress, finished_cb=_finished)
+                else:
+                    ok = self.flow_canvas.load_from_file(recent_path)
+                    _finished(ok)
+        except Exception as e:
+            self.statusbar.showMessage(f'自动加载异常: {e}')

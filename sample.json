@@ -3,10 +3,10 @@
     {
       "module_id": "fe5ee180-741e-4398-9c09-b7994ed619fe",
       "module_type": "图片导入",
-      "x": -319.6057098765432,
-      "y": 516.3455504115225,
+      "x": 838.4422901234568,
+      "y": 561.2735504115221,
       "width": 140.0,
-      "height": 80.0,
+      "height": 106.0,
       "inputs": [
         "control"
       ],
@@ -34,8 +34,8 @@
     {
       "module_id": "f3bcb00e-8c40-47a9-8f5f-c96d23cd705c",
       "module_type": "图片展示",
-      "x": -36.0,
-      "y": 264.0,
+      "x": 1122.0480000000002,
+      "y": 308.9280000000001,
       "width": 464.0,
       "height": 327.0,
       "inputs": [
@@ -60,10 +60,10 @@
     {
       "module_id": "4de43783-7913-4f10-9ff9-06f72ac62519",
       "module_type": "打印显示",
-      "x": -237.0,
-      "y": 737.0,
-      "width": 697.0,
-      "height": 188.0,
+      "x": 1027.0480000000002,
+      "y": 804.9279999999999,
+      "width": 582.0,
+      "height": 222.0,
       "inputs": [
         "data"
       ],
@@ -85,10 +85,10 @@
     {
       "module_id": "d94a42ce-d52a-4bf9-99b6-1a0f6c269920",
       "module_type": "yolov8分割",
-      "x": 644.0,
-      "y": 218.0,
-      "width": 140.0,
-      "height": 80.0,
+      "x": 1737.0480000000002,
+      "y": 272.9280000000001,
+      "width": 200.0,
+      "height": 126.0,
       "inputs": [
         "image"
       ],
@@ -111,10 +111,10 @@
     {
       "module_id": "5087fad0-88b7-4c8c-bbc0-bd7639d6d627",
       "module_type": "yolov8检测",
-      "x": 619.0,
-      "y": 419.0,
-      "width": 140.0,
-      "height": 80.0,
+      "x": 1732.0480000000002,
+      "y": 471.9280000000001,
+      "width": 211.0,
+      "height": 104.0,
       "inputs": [
         "image"
       ],
@@ -138,8 +138,8 @@
     {
       "module_id": "3fca569a-d164-4c13-a6eb-061b2a0ce989",
       "module_type": "图片展示",
-      "x": 868.0,
-      "y": 84.0,
+      "x": 2026.0480000000002,
+      "y": 128.92800000000005,
       "width": 321.0,
       "height": 237.0,
       "inputs": [
@@ -164,10 +164,10 @@
     {
       "module_id": "e4814ef1-29db-4939-b23a-168ef0e1b5fd",
       "module_type": "图片展示",
-      "x": 848.0,
-      "y": 395.0,
-      "width": 389.0,
-      "height": 284.0,
+      "x": 2006.0480000000002,
+      "y": 439.928,
+      "width": 349.0,
+      "height": 286.0,
       "inputs": [
         "image"
       ],
@@ -176,8 +176,8 @@
         "meta"
       ],
       "config": {
-        "width": 389,
-        "height": 284,
+        "width": 349,
+        "height": 286,
         "maintain_aspect": true,
         "downscale_only": true,
         "update_mode": "on_change",
@@ -190,8 +190,8 @@
     {
       "module_id": "91bfb187-0641-48a4-bc94-5bb85aa47191",
       "module_type": "打印显示",
-      "x": 1256.0,
-      "y": 404.0,
+      "x": 2414.0480000000007,
+      "y": 448.928,
       "width": 415.0,
       "height": 275.0,
       "inputs": [
@@ -215,8 +215,8 @@
     {
       "module_id": "6a2a79b1-3b22-4c1e-b94a-e18c131d6c3f",
       "module_type": "打印显示",
-      "x": 1237.0,
-      "y": 78.0,
+      "x": 2395.0480000000007,
+      "y": 122.92800000000005,
       "width": 412.0,
       "height": 258.0,
       "inputs": [
@@ -240,10 +240,10 @@
     {
       "module_id": "6a992b31-a97f-4a85-8230-fc1e02a7b719",
       "module_type": "yolov8分类",
-      "x": 635.0,
-      "y": 654.0,
-      "width": 140.0,
-      "height": 80.0,
+      "x": 1717.0479999999998,
+      "y": 678.9279999999997,
+      "width": 189.0,
+      "height": 99.0,
       "inputs": [
         "image"
       ],
@@ -263,10 +263,10 @@
     {
       "module_id": "d9862de1-57ad-41a1-90f1-db841f8e3826",
       "module_type": "图片展示",
-      "x": 803.0,
-      "y": 767.0,
-      "width": 391.0,
-      "height": 245.0,
+      "x": 2000.0480000000002,
+      "y": 816.9279999999997,
+      "width": 350.0,
+      "height": 287.0,
       "inputs": [
         "image"
       ],
@@ -275,8 +275,8 @@
         "meta"
       ],
       "config": {
-        "width": 391,
-        "height": 245,
+        "width": 350,
+        "height": 287,
         "maintain_aspect": true,
         "downscale_only": true,
         "update_mode": "on_change",
@@ -289,10 +289,10 @@
     {
       "module_id": "077db32e-1309-4dc1-a1e6-a30f12ee7f54",
       "module_type": "打印显示",
-      "x": 1249.0,
-      "y": 761.0,
-      "width": 469.0,
-      "height": 256.0,
+      "x": 2402.0480000000007,
+      "y": 775.9279999999997,
+      "width": 550.0,
+      "height": 244.0,
       "inputs": [
         "data"
       ],
@@ -308,6 +308,126 @@
         "interval_ms": 0,
         "merge_dict": true,
         "show_timestamp": true
+      },
+      "state": {}
+    },
+    {
+      "module_id": "f74a61ab-27b5-4d36-9ba2-fa9d0d1669f0",
+      "module_type": "逻辑",
+      "x": 1355.8240000000005,
+      "y": 1357.560000000001,
+      "width": 140.0,
+      "height": 81.0,
+      "inputs": [
+        "a",
+        "b"
+      ],
+      "outputs": [
+        "result"
+      ],
+      "config": {},
+      "state": {}
+    },
+    {
+      "module_id": "55ab3691-55c3-48cd-b9ee-d594126e541a",
+      "module_type": "文本输入",
+      "x": 982.8240000000004,
+      "y": 1470.560000000001,
+      "width": 140.0,
+      "height": 80.0,
+      "inputs": [],
+      "outputs": [
+        "text"
+      ],
+      "config": {},
+      "state": {
+        "text_value": "Hello"
+      }
+    },
+    {
+      "module_id": "ee6e75d7-df92-421a-87ea-752d1907ae22",
+      "module_type": "文本输入",
+      "x": 995.8240000000004,
+      "y": 1192.560000000001,
+      "width": 140.0,
+      "height": 80.0,
+      "inputs": [],
+      "outputs": [
+        "text"
+      ],
+      "config": {},
+      "state": {
+        "text_value": "Hello"
+      }
+    },
+    {
+      "module_id": "5fc2bc2c-4544-4ad8-8a70-e54e262d551d",
+      "module_type": "OK/NOK展示",
+      "x": 1600.3599999999997,
+      "y": 1217.7200000000012,
+      "width": 276.0,
+      "height": 233.0,
+      "inputs": [
+        "flag"
+      ],
+      "outputs": [
+        "flag",
+        "text",
+        "status"
+      ],
+      "config": {
+        "true_label": "OK",
+        "false_label": "NOK",
+        "auto_inverse": true,
+        "remember_last": true,
+        "font_size": 60
+      },
+      "state": {}
+    },
+    {
+      "module_id": "4e0fe900-52e3-4893-8f25-bbb13d1dee5d",
+      "module_type": "OK/NOK展示",
+      "x": 1613.0880000000002,
+      "y": 1495.7200000000012,
+      "width": 274.0,
+      "height": 252.0,
+      "inputs": [
+        "flag"
+      ],
+      "outputs": [
+        "flag",
+        "text",
+        "status"
+      ],
+      "config": {
+        "true_label": "OK",
+        "false_label": "NOK",
+        "auto_inverse": true,
+        "remember_last": true,
+        "font_size": 60
+      },
+      "state": {}
+    },
+    {
+      "module_id": "23d52bbe-7380-4a60-b8e3-a5d3802f3a9f",
+      "module_type": "逻辑",
+      "x": 1367.8240000000005,
+      "y": 1655.5600000000002,
+      "width": 140.0,
+      "height": 80.0,
+      "inputs": [
+        "a",
+        "b"
+      ],
+      "outputs": [
+        "result"
+      ],
+      "config": {
+        "op": "AND",
+        "invert": true,
+        "expr": "",
+        "inputs_count": 2,
+        "history_size": 20
       },
       "state": {}
     }
@@ -378,6 +498,82 @@
       "source_port": "results",
       "target_module": "077db32e-1309-4dc1-a1e6-a30f12ee7f54",
       "target_port": "data"
+    },
+    {
+      "source_module": "ee6e75d7-df92-421a-87ea-752d1907ae22",
+      "source_port": "text",
+      "target_module": "f74a61ab-27b5-4d36-9ba2-fa9d0d1669f0",
+      "target_port": "a"
+    },
+    {
+      "source_module": "55ab3691-55c3-48cd-b9ee-d594126e541a",
+      "source_port": "text",
+      "target_module": "f74a61ab-27b5-4d36-9ba2-fa9d0d1669f0",
+      "target_port": "b"
+    },
+    {
+      "source_module": "f74a61ab-27b5-4d36-9ba2-fa9d0d1669f0",
+      "source_port": "result",
+      "target_module": "5fc2bc2c-4544-4ad8-8a70-e54e262d551d",
+      "target_port": "flag"
+    },
+    {
+      "source_module": "ee6e75d7-df92-421a-87ea-752d1907ae22",
+      "source_port": "text",
+      "target_module": "23d52bbe-7380-4a60-b8e3-a5d3802f3a9f",
+      "target_port": "a"
+    },
+    {
+      "source_module": "55ab3691-55c3-48cd-b9ee-d594126e541a",
+      "source_port": "text",
+      "target_module": "23d52bbe-7380-4a60-b8e3-a5d3802f3a9f",
+      "target_port": "b"
+    },
+    {
+      "source_module": "23d52bbe-7380-4a60-b8e3-a5d3802f3a9f",
+      "source_port": "result",
+      "target_module": "4e0fe900-52e3-4893-8f25-bbb13d1dee5d",
+      "target_port": "flag"
+    }
+  ],
+  "groups": [
+    {
+      "group_id": "group_1",
+      "title": "1",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 2153.605709876544,
+      "height": 1020.9999999999998,
+      "members": [
+        "4de43783-7913-4f10-9ff9-06f72ac62519",
+        "6a992b31-a97f-4a85-8230-fc1e02a7b719",
+        "6a2a79b1-3b22-4c1e-b94a-e18c131d6c3f",
+        "5087fad0-88b7-4c8c-bbc0-bd7639d6d627",
+        "077db32e-1309-4dc1-a1e6-a30f12ee7f54",
+        "d9862de1-57ad-41a1-90f1-db841f8e3826",
+        "3fca569a-d164-4c13-a6eb-061b2a0ce989",
+        "d94a42ce-d52a-4bf9-99b6-1a0f6c269920",
+        "e4814ef1-29db-4939-b23a-168ef0e1b5fd",
+        "fe5ee180-741e-4398-9c09-b7994ed619fe",
+        "91bfb187-0641-48a4-bc94-5bb85aa47191",
+        "f3bcb00e-8c40-47a9-8f5f-c96d23cd705c"
+      ]
+    },
+    {
+      "group_id": "group_2",
+      "title": "分组",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 964.9999999999998,
+      "height": 647.0,
+      "members": [
+        "4e0fe900-52e3-4893-8f25-bbb13d1dee5d",
+        "ee6e75d7-df92-421a-87ea-752d1907ae22",
+        "f74a61ab-27b5-4d36-9ba2-fa9d0d1669f0",
+        "55ab3691-55c3-48cd-b9ee-d594126e541a",
+        "5fc2bc2c-4544-4ad8-8a70-e54e262d551d",
+        "23d52bbe-7380-4a60-b8e3-a5d3802f3a9f"
+      ]
     }
   ]
 }

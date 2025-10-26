@@ -107,6 +107,13 @@ class PipelineExecutor:
         self.execution_count = 0
         self.total_execution_time = 0.0
         self.error_count = 0
+        # 性能指标：{node_id: {'exec_count':int,'total_time':float,'max_time':float,'last_time':float,'avg_time':float}}
+        self._perf_stats: Dict[str, Dict[str, float]] = {}
+        self._perf_lock = threading.Lock()
+        self._metrics_callbacks: List[Callable] = []  # 周期指标回调 (stats_dict, aggregate_dict)
+        self._metrics_interval_s = 1.0
+        self._metrics_timer_thread = None
+        self._metrics_stop = threading.Event()
         
         # 配置
         self.config = {
@@ -274,6 +281,10 @@ class PipelineExecutor:
             # 创建线程池
             if self.execution_mode in [ExecutionMode.PARALLEL, ExecutionMode.PIPELINE]:
                 self.thread_pool = ThreadPoolExecutor(max_workers=self.max_workers)
+
+            # 启动性能指标定时线程
+            if self.config.get("enable_monitoring", True):
+                self._start_metrics_loop()
                 
             # 启动执行线程
             self.executor_thread = threading.Thread(target=self._execution_loop)
@@ -313,6 +324,8 @@ class PipelineExecutor:
                 
             self.status = PipelineStatus.STOPPED
             self.logger.info("流程执行已停止")
+            # 停止性能指标线程
+            self._stop_metrics_loop()
             return True
             
         except Exception as e:
@@ -543,6 +556,7 @@ class PipelineExecutor:
             start_time = time.time()
             result = node.module.run_cycle()
             node.execution_time = time.time() - start_time
+            self._record_perf(node.node_id, node.execution_time)
             node.last_result = result
             self._route_outputs(node, result, current_data)
             # 通知模块结束执行
@@ -565,6 +579,7 @@ class PipelineExecutor:
                 start_time = time.time()
                 result = node.module.run_cycle()
                 node.execution_time = time.time() - start_time
+                self._record_perf(node.node_id, node.execution_time)
                 node.last_result = result
                 self._route_outputs(node, result, current_data)
                 self._notify_module_step(node.node_id, 'end')
@@ -601,6 +616,7 @@ class PipelineExecutor:
         start_time = time.time()
         result = node.module.run_cycle()
         node.execution_time = time.time() - start_time
+        self._record_perf(node.node_id, node.execution_time)
         self._notify_module_step(node.node_id, 'end')
         return result
         
@@ -723,6 +739,63 @@ class PipelineExecutor:
             "error_count": self.error_count,
             "throughput": 1.0 / avg_time if avg_time > 0 else 0
         }
+
+    # ---------- 性能监控扩展 ----------
+    def _record_perf(self, node_id: str, duration: float):
+        with self._perf_lock:
+            stat = self._perf_stats.get(node_id)
+            if not stat:
+                stat = {'exec_count': 0, 'total_time': 0.0, 'max_time': 0.0, 'last_time': 0.0, 'avg_time': 0.0}
+                self._perf_stats[node_id] = stat
+            stat['exec_count'] += 1
+            stat['total_time'] += duration
+            stat['last_time'] = duration
+            if duration > stat['max_time']:
+                stat['max_time'] = duration
+            stat['avg_time'] = stat['total_time'] / stat['exec_count']
+
+    def get_metrics(self) -> Dict[str, Any]:
+        with self._perf_lock:
+            per_node = {nid: stats.copy() for nid, stats in self._perf_stats.items()}
+        aggregate = {
+            'modules_profiled': len(per_node),
+            'total_execs': sum(s['exec_count'] for s in per_node.values()),
+            'total_time': sum(s['total_time'] for s in per_node.values()),
+        }
+        return {'nodes': per_node, 'aggregate': aggregate}
+
+    def reset_metrics(self):
+        with self._perf_lock:
+            self._perf_stats.clear()
+
+    def add_metrics_callback(self, callback: Callable):
+        """注册性能指标回调: callback(stats_dict, aggregate_dict)"""
+        self._metrics_callbacks.append(callback)
+
+    def _start_metrics_loop(self):
+        if self._metrics_timer_thread and self._metrics_timer_thread.is_alive():
+            return
+        self._metrics_stop.clear()
+        def _loop():
+            while not self._metrics_stop.is_set():
+                time.sleep(self._metrics_interval_s)
+                try:
+                    data = self.get_metrics()
+                    for cb in self._metrics_callbacks:
+                        try:
+                            cb(data['nodes'], data['aggregate'])
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        self._metrics_timer_thread = threading.Thread(target=_loop, daemon=True)
+        self._metrics_timer_thread.start()
+
+    def _stop_metrics_loop(self):
+        self._metrics_stop.set()
+        if self._metrics_timer_thread and self._metrics_timer_thread.is_alive():
+            self._metrics_timer_thread.join(timeout=1.5)
+        self._metrics_timer_thread = None
         
     def get_pipeline_graph(self) -> Dict[str, Any]:
         """获取流程图信息"""

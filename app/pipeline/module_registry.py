@@ -153,6 +153,11 @@ try:
     register_module("路径选择器", PathSelectorModule)
 except Exception as e:
     pass
+try:
+    from .custom.ok_nok_display_module import OkNokDisplayModule
+    register_module("OK/NOK展示", OkNokDisplayModule)
+except Exception as e:
+    pass
 
 # YOLOv8 模型系列模块 (检测/分类/分割)
 try:

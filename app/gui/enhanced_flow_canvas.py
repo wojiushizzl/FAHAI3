@@ -65,6 +65,18 @@ class ModuleItem(QGraphicsRectItem):
             self._text_item.setFont(QFont("Consolas", 9))
             self._text_item.setDefaultTextColor(QColor(30, 30, 30))
             self._text_item.setPos(8, 24)
+        # OK/NOK 状态模块
+        self._is_oknok_viewer = (module_type == "OK/NOK展示")
+        self._oknok_rect = None
+        self._oknok_text = None
+        if self._is_oknok_viewer:
+            from PyQt6.QtWidgets import QGraphicsRectItem
+            self._oknok_rect = QGraphicsRectItem(self)
+            self._oknok_rect.setBrush(QBrush(QColor(180, 180, 180)))
+            self._oknok_rect.setPen(QPen(QColor(120,120,120),1))
+            self._oknok_text = QGraphicsTextItem("?", self._oknok_rect)
+            self._oknok_text.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+            self._oknok_text.setDefaultTextColor(QColor(255,255,255))
 
         # 可调整大小支持
         self._resizing = False
@@ -93,8 +105,21 @@ class ModuleItem(QGraphicsRectItem):
             self._update_thumbnail(None)
 
     def _create_points(self):
+        """创建端口并为后续展示内容预留下方区域。
+        布局策略：
+        - 顶部标题占约 20px 高度。
+        - 端口自标题下开始，行高 18px。
+        - 输入端口靠左，输出端口靠右（同一 Y 对齐）。
+        - 预留内容区起始 y = 标题高度 + max(port_rows)*行高 + 下间距。
+        - 缩略图或文本显示位于内容区，不与端口重叠。
+        """
+        title_h = 20
+        row_h = 18
+        max_rows = max(len(self.input_ports_def), len(self.output_ports_def))
+        ports_start_y = title_h  # 第一行端口的顶部位置
+        # 构建输入端口
         for idx, name in enumerate(self.input_ports_def):
-            y = 20 + idx * 20
+            y = ports_start_y + idx * row_h
             point = ConnectionPoint(self, "input", -6, y - 5, name, canvas=self.canvas)
             self.input_points.append(point)
             label = QGraphicsTextItem(name, self)
@@ -102,15 +127,29 @@ class ModuleItem(QGraphicsRectItem):
             label.setDefaultTextColor(QColor(50, 50, 50))
             label.setPos(2, y - 8)
             self.input_labels.append(label)
+        # 构建输出端口
         for idx, name in enumerate(self.output_ports_def):
-            y = 20 + idx * 20
+            y = ports_start_y + idx * row_h
             point = ConnectionPoint(self, "output", self.rect().width() - 4, y - 5, name, canvas=self.canvas)
             self.output_points.append(point)
             label = QGraphicsTextItem(name, self)
             label.setFont(QFont("Arial", 8))
             label.setDefaultTextColor(QColor(50, 50, 50))
+            # 输出标签置于中间偏右，避免与输入标签重叠
             label.setPos(self.rect().width()/2 - 10, y - 8)
             self.output_labels.append(label)
+        # 计算内容区起始 y
+        self._content_offset = title_h + max_rows * row_h + 6  # 端口区下额外留白
+        # 若当前矩形高度不足以展示最小内容区则扩展
+        min_content_h = 60 if (self._is_image_viewer or self._is_text_viewer) else 0
+        needed_h = self._content_offset + min_content_h + 8
+        if needed_h > self.rect().height():
+            self.setRect(0, 0, self.rect().width(), needed_h)
+        # 初始内容项位置
+        if self._thumb_item:
+            self._thumb_item.setPos(8, self._content_offset)
+        if getattr(self, '_text_item', None):
+            self._text_item.setPos(8, self._content_offset)
 
     def refresh_ports(self):
         """根据 module_ref 的当前端口定义刷新图形端口。移除旧端口与标签并重建。
@@ -172,30 +211,65 @@ class ModuleItem(QGraphicsRectItem):
                 self._prev_text_content = text
                 display = text if text.strip() else "(无内容)"
                 self._text_item.setPlainText(display)
-                # 设定文本宽度以触发自动换行
-                self._text_item.setTextWidth(max(20, self.rect().width() - 16))
+                # 设定文本宽度为内容区宽度
+                content_width = max(20, self.rect().width() - 16)
+                self._text_item.setTextWidth(content_width)
                 try:
                     doc_height = self._text_item.document().size().height()
                 except Exception:
                     doc_height = 0
-                base_h = 30 + doc_height + 10
-                if base_h > self.rect().height():
-                    # 增加高度，保持宽度不变
-                    self.setRect(0, 0, self.rect().width(), base_h)
+                # 内容区所需高度 = doc_height + 内边距
+                needed_h = self._content_offset + doc_height + 12
+                if needed_h > self.rect().height():
+                    self.setRect(0, 0, self.rect().width(), needed_h)
                     self._relayout_ports()
+        # ----- OK/NOK 状态展示 -----
+        if self._is_oknok_viewer and self._oknok_rect and self.module_ref:
+            try:
+                flag = self.module_ref.outputs.get('flag')
+                txt = self.module_ref.outputs.get('text') or getattr(self.module_ref, 'display_text', '?')
+                font_sz = int(self.module_ref.config.get('font_size', 12)) if isinstance(self.module_ref.config, dict) else 12
+            except Exception:
+                flag = None; txt = '?'; font_sz = 12
+            # 颜色选择
+            if flag is True:
+                bg = QColor(46,125,50)   # 绿色
+            elif flag is False:
+                bg = QColor(198,40,40)   # 红色
+            else:
+                bg = QColor(120,120,120) # 未知
+            self._oknok_rect.setBrush(QBrush(bg))
+            self._oknok_text.setPlainText(str(txt))
+            # 应用字体大小
+            try:
+                self._oknok_text.setFont(QFont("Arial", max(8, min(font_sz, 72)), QFont.Weight.Bold))
+            except Exception:
+                pass
+            # 定位与尺寸：放置于内容区，填满可用宽度的一部分
+            content_offset = getattr(self, '_content_offset', 40)
+            inner_w = max(60, self.rect().width() - 16)
+            inner_h = max(34, self.rect().height() - content_offset - 8)
+            self._oknok_rect.setRect(8, content_offset, inner_w, inner_h)
+            # 文本居中
+            try:
+                b = self._oknok_text.boundingRect()
+                tx = 8 + (inner_w - b.width())/2
+                ty = content_offset + (inner_h - b.height())/2 - 2
+                self._oknok_text.setPos(tx, ty)
+            except Exception:
+                pass
 
     def _update_thumbnail(self, img):
         if not self._thumb_item:
             return
         from PyQt6.QtGui import QImage, QPixmap
-        # 使用当前矩形尺寸动态确定缩略图区域，而不是仅依赖配置 width/height
-        # 留出左右与标题区域的内边距
-        available_w = int(self.rect().width()) - 16  # 左右各留 8px
-        available_h = int(self.rect().height()) - 34  # 顶部标题 ~24px + 下方 10px 余量
+        # 内容区尺寸：矩形总高减去内容偏移与底部内边距
+        content_offset = getattr(self, '_content_offset', 40)
+        available_w = int(self.rect().width()) - 16
+        available_h = int(self.rect().height()) - content_offset - 8
         if available_w < 20: available_w = 20
         if available_h < 20: available_h = 20
-        w = available_w
-        h = available_h
+        w, h = available_w, available_h
         if img is None or not hasattr(img, 'shape'):
             placeholder = QImage(w, h, QImage.Format.Format_RGB32)
             placeholder.fill(QColor(230, 230, 230))
@@ -326,22 +400,30 @@ class ModuleItem(QGraphicsRectItem):
         super().mouseReleaseEvent(event)
 
     def _relayout_ports(self):
+        # 重新计算内容偏移（端口区高度可能受矩形宽度变化影响 label 定位不大）
+        title_h = 20
+        row_h = 18
+        max_rows = max(len(self.input_points), len(self.output_points))
+        self._content_offset = title_h + max_rows * row_h + 6
+        # 输入端口位置更新
         for idx, point in enumerate(self.input_points):
-            y = 20 + idx*20
-            point.setPos(-6, y-5)
+            y = title_h + idx * row_h
+            point.setPos(-6, y - 5)
             if idx < len(self.input_labels):
-                self.input_labels[idx].setPos(2, y-8)
+                self.input_labels[idx].setPos(2, y - 8)
             point.update_connections()
+        # 输出端口位置更新
         for idx, point in enumerate(self.output_points):
-            y = 20 + idx*20
-            point.setPos(self.rect().width()-4, y-5)
+            y = title_h + idx * row_h
+            point.setPos(self.rect().width() - 4, y - 5)
             if idx < len(self.output_labels):
-                self.output_labels[idx].setPos(self.rect().width()/2 - 10, y-8)
+                self.output_labels[idx].setPos(self.rect().width()/2 - 10, y - 8)
             point.update_connections()
+        # 内容项位置
         if self._thumb_item:
-            self._thumb_item.setPos(8, 24)
+            self._thumb_item.setPos(8, self._content_offset)
         if getattr(self, '_text_item', None):
-            self._text_item.setPos(8, 24)
+            self._text_item.setPos(8, self._content_offset)
         if self._corner_handle:
             self._corner_handle.setRect(
                 self.rect().width() - self._corner_handle_size,
@@ -349,6 +431,19 @@ class ModuleItem(QGraphicsRectItem):
                 self._corner_handle_size,
                 self._corner_handle_size
             )
+        if self._is_oknok_viewer and self._oknok_rect:
+            content_offset = getattr(self, '_content_offset', 40)
+            inner_w = max(60, self.rect().width() - 16)
+            inner_h = max(34, self.rect().height() - content_offset - 8)
+            self._oknok_rect.setRect(8, content_offset, inner_w, inner_h)
+            if self._oknok_text:
+                try:
+                    b = self._oknok_text.boundingRect()
+                    tx = 8 + (inner_w - b.width())/2
+                    ty = content_offset + (inner_h - b.height())/2 - 2
+                    self._oknok_text.setPos(tx, ty)
+                except Exception:
+                    pass
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
@@ -401,7 +496,13 @@ class EnhancedFlowCanvas(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setInteractive(True)
-        self.scene.setSceneRect(0,0,2000,2000)
+        # 扩大画布尺寸以支持更大流程
+        self.scene.setSceneRect(0,0,4000,3000)
+        # 缩放/调整锚点，使缩放以鼠标位置为中心
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        # 分组ID序号
+        self._group_seq = 1
         self.setAcceptDrops(True)
         self.modules: List[ModuleItem] = []
         self.connections = []  # (line, start_point, end_point)
@@ -452,6 +553,7 @@ class EnhancedFlowCanvas(QGraphicsView):
         self.scene.addItem(item)
         self.modules.append(item)
         self.module_added.emit(module_type)
+        self._ensure_scene_margin()
         if not self._suppress_history:
             self._record_history()
 
@@ -559,12 +661,26 @@ class EnhancedFlowCanvas(QGraphicsView):
         menu.addSeparator()
         clear_act = QAction("清空画布", self); clear_act.triggered.connect(self.clear)
         menu.addAction(clear_act)
+        # 分组相关：若选择了多个模块，提供创建分组
+        sel_modules = [it for it in self.scene.selectedItems() if isinstance(it, ModuleItem)]
+        if len(sel_modules) >= 2:
+            group_act = QAction("创建分组", self)
+            group_act.triggered.connect(lambda: self._create_group_from_selection(sel_modules))
+            menu.addAction(group_act)
+        # 分组单选操作：重命名 / 删除
+        sel_groups = [it for it in self.scene.selectedItems() if isinstance(it, GroupBoxItem)]
+        if len(sel_groups) == 1:
+            g = sel_groups[0]
+            rename_act = QAction("重命名分组", self); rename_act.triggered.connect(lambda: self._rename_group(g))
+            del_act = QAction("删除分组", self); del_act.triggered.connect(lambda: self._delete_group(g))
+            menu.addAction(rename_act); menu.addAction(del_act)
         menu.exec(event.globalPos())
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             factor = 1.2 if event.angleDelta().y() > 0 else (1/1.2)
             self.scale(factor, factor)
+            self._ensure_scene_margin()
         else:
             super().wheelEvent(event)
 
@@ -631,8 +747,14 @@ class EnhancedFlowCanvas(QGraphicsView):
             if delta.manhattanLength() > 0:
                 if delta.manhattanLength() >= self._pan_threshold:
                     self._pan_moved = True
-                self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
-                self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+                hsb = self.horizontalScrollBar(); vsb = self.verticalScrollBar()
+                # 若滚动范围为零（缩放导致场景全在视口内），使用视图矩阵平移
+                if (hsb.maximum() - hsb.minimum()) == 0 and (vsb.maximum() - vsb.minimum()) == 0:
+                    self.translate(delta.x(), delta.y())
+                    self._ensure_scene_margin()
+                else:
+                    hsb.setValue(hsb.value() - delta.x())
+                    vsb.setValue(vsb.value() - delta.y())
                 self._pan_last_pos = event.pos()
             super().mouseMoveEvent(event)
             return
@@ -747,7 +869,67 @@ class EnhancedFlowCanvas(QGraphicsView):
                 'target_module': ep.parent_item.module_id,
                 'target_port': ep.port_name
             })
-        return {'modules': modules, 'connections': links}
+        groups = []
+        for g in self.list_groups():
+            rect = g.rect()
+            groups.append({
+                'group_id': getattr(g,'group_id',''),
+                'title': g.title.toPlainText() if hasattr(g,'title') else '分组',
+                'x': rect.x(), 'y': rect.y(), 'width': rect.width(), 'height': rect.height(),
+                'members': g.members
+            })
+        return {'modules': modules, 'connections': links, 'groups': groups}
+
+    # ---------- 分组支持 ----------
+    def _create_group_from_selection(self, items):
+        # 计算边界
+        min_x = min([it.scenePos().x() for it in items])
+        min_y = min([it.scenePos().y() for it in items])
+        max_x = max([it.scenePos().x() + it.rect().width() for it in items])
+        max_y = max([it.scenePos().y() + it.rect().height() for it in items])
+        margin = 20
+        group_rect = QRectF(min_x - margin, min_y - margin, (max_x - min_x) + 2*margin, (max_y - min_y) + 2*margin)
+        gid = f"group_{self._group_seq}"; self._group_seq += 1
+        grp = GroupBoxItem(group_rect.x(), group_rect.y(), group_rect.width(), group_rect.height(), canvas=self, members=[it.module_id for it in items], group_id=gid)
+        self.scene.addItem(grp)
+        grp.setZValue(-5)  # 在模块后面
+        # 取消选择模块，选择分组框方便拖动
+        for it in items:
+            it.setSelected(False)
+        grp.setSelected(True)
+
+    def list_groups(self):
+        return [it for it in self.scene.items() if isinstance(it, GroupBoxItem)]
+
+    def _rename_group(self, group: 'GroupBoxItem'):
+        from PyQt6.QtWidgets import QInputDialog
+        old = group.title.toPlainText() if group.title else '分组'
+        new, ok = QInputDialog.getText(self, '重命名分组', '名称:', text=old)
+        if ok and new.strip():
+            group.title.setPlainText(new.strip())
+
+    def _delete_group(self, group: 'GroupBoxItem'):
+        try:
+            self.scene.removeItem(group)
+        except Exception:
+            pass
+
+    def _ensure_scene_margin(self, margin: int = 400):
+        items = [m for m in self.modules] + self.list_groups()
+        if not items:
+            return
+        min_x = min([it.scenePos().x() for it in items])
+        min_y = min([it.scenePos().y() for it in items])
+        max_x = max([it.scenePos().x() + (it.rect().width() if hasattr(it,'rect') else 0) for it in items])
+        max_y = max([it.scenePos().y() + (it.rect().height() if hasattr(it,'rect') else 0) for it in items])
+        r = self.scene.sceneRect()
+        new_left = min(r.left(), min_x - margin)
+        new_top = min(r.top(), min_y - margin)
+        new_right = max(r.right(), max_x + margin)
+        new_bottom = max(r.bottom(), max_y + margin)
+        if (new_left, new_top, new_right, new_bottom) != (r.left(), r.top(), r.right(), r.bottom()):
+            self.scene.setSceneRect(new_left, new_top, new_right - new_left, new_bottom - new_top)
+
 
     def import_structure(self, data: Dict[str, Any]):
         # 重建（记录历史前不再次截断）
@@ -790,6 +972,16 @@ class EnhancedFlowCanvas(QGraphicsView):
             self.connections.append((line, sp, tp))
         self._suppress_history = False
         self._record_history()
+        # 分组重建
+        for g in data.get('groups', []):
+            try:
+                grp = GroupBoxItem(g.get('x',0), g.get('y',0), g.get('width',200), g.get('height',120), canvas=self, members=g.get('members', []), group_id=g.get('group_id',''))
+                if 'title' in g and grp.title:
+                    grp.title.setPlainText(g['title'])
+                self.scene.addItem(grp)
+                grp.setZValue(-5)
+            except Exception:
+                pass
 
     # ---------- 剪贴板与历史 ----------
     def copy_selection(self):
@@ -981,6 +1173,15 @@ class EnhancedFlowCanvas(QGraphicsView):
             sp.connections.append(line)
             tp.connections.append(line)
             self.connections.append((line, sp, tp))
+        # 重建分组
+        for g in data.get('groups', []):
+            try:
+                grp = GroupBoxItem(g.get('x',0), g.get('y',0), g.get('width',200), g.get('height',120), canvas=self, members=g.get('members', []), group_id=g.get('group_id',''))
+                if 'title' in g and grp.title:
+                    grp.title.setPlainText(g['title'])
+                self.scene.addItem(grp); grp.setZValue(-5)
+            except Exception:
+                pass
         return True
 
     # ---------- GUI → Executor Bridge ----------
@@ -1105,3 +1306,53 @@ class EnhancedFlowCanvas(QGraphicsView):
                     m.refresh_visual()
                 except Exception:
                     pass
+
+
+class GroupBoxItem(QGraphicsRectItem):
+    """分组框：用于视觉分组多个模块，支持拖动、重命名、删除与持久化。
+    修复：原实现错误地将 (x,y) 作为局部矩形坐标，导致重载后位置与尺寸错乱。
+    现在：局部 rect 固定从 (0,0) 开始，(x,y) 通过 setPos 放入场景。
+    group_id: 持久化唯一标识
+    members: 模块ID列表
+    """
+    def __init__(self, x, y, w, h, canvas: 'EnhancedFlowCanvas', members: List[str], group_id: str = ""):
+        super().__init__(0, 0, w, h)
+        self.setPos(x, y)
+        self.canvas = canvas
+        self.members = members[:]
+        self.group_id = group_id or f"group_{id(self)}"
+        self.setBrush(QBrush(QColor(255,255,210,40)))
+        self.setPen(QPen(QColor(200,170,0), 2, Qt.PenStyle.DashLine))
+        self.setZValue(-5)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
+        self.title = QGraphicsTextItem("分组", self)
+        self.title.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        self.title.setDefaultTextColor(QColor(120,90,0))
+        self.title.setPos(6, 4)  # 固定距离左上角，避免因重载坐标偏移
+
+    def paint(self, painter: QPainter, option, widget=None):
+        # 动态高亮：选中时加粗边框并改变颜色
+        pen = QPen(QColor(200,170,0) if not self.isSelected() else QColor(255,140,0))
+        pen.setStyle(Qt.PenStyle.DashLine)
+        pen.setWidth(2 if not self.isSelected() else 3)
+        painter.setPen(pen)
+        painter.setBrush(QBrush(QColor(255,255,210,40)))
+        painter.drawRect(self.rect())  # rect 从 (0,0) 开始
+        super().paint(painter, option, widget)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange and hasattr(self, 'canvas'):
+            try:
+                old_pos = self.scenePos()
+                new_pos = value
+                delta = new_pos - old_pos
+                for m in self.canvas.modules:
+                    if m.module_id in self.members:
+                        m.setPos(m.scenePos() + delta)
+                        for p in m.input_points + m.output_points:
+                            p.update_connections()
+            except Exception:
+                pass
+        return super().itemChange(change, value)
