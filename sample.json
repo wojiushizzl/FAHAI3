@@ -3,8 +3,8 @@
     {
       "module_id": "fe5ee180-741e-4398-9c09-b7994ed619fe",
       "module_type": "图片导入",
-      "x": 807.3382901234564,
-      "y": 490.7711504115219,
+      "x": 887.9598581234566,
+      "y": 242.93447841152187,
       "width": 140.0,
       "height": 106.0,
       "inputs": [
@@ -34,8 +34,8 @@
     {
       "module_id": "f3bcb00e-8c40-47a9-8f5f-c96d23cd705c",
       "module_type": "图片展示",
-      "x": 1090.9440000000002,
-      "y": 238.4255999999997,
+      "x": 1171.5655679999998,
+      "y": -9.411072000000217,
       "width": 464.0,
       "height": 327.0,
       "inputs": [
@@ -60,8 +60,8 @@
     {
       "module_id": "4de43783-7913-4f10-9ff9-06f72ac62519",
       "module_type": "打印显示",
-      "x": 995.9440000000001,
-      "y": 734.4255999999998,
+      "x": 1076.5655679999998,
+      "y": 486.5889279999998,
       "width": 582.0,
       "height": 222.0,
       "inputs": [
@@ -85,8 +85,8 @@
     {
       "module_id": "d94a42ce-d52a-4bf9-99b6-1a0f6c269920",
       "module_type": "yolov8分割",
-      "x": 1705.944000000001,
-      "y": 202.4255999999997,
+      "x": 1786.5655679999998,
+      "y": -45.41107200000022,
       "width": 200.0,
       "height": 126.0,
       "inputs": [
@@ -111,8 +111,8 @@
     {
       "module_id": "5087fad0-88b7-4c8c-bbc0-bd7639d6d627",
       "module_type": "yolov8检测",
-      "x": 1700.944000000001,
-      "y": 401.42559999999975,
+      "x": 1781.5655679999998,
+      "y": 153.58892799999984,
       "width": 211.0,
       "height": 104.0,
       "inputs": [
@@ -138,8 +138,8 @@
     {
       "module_id": "3fca569a-d164-4c13-a6eb-061b2a0ce989",
       "module_type": "图片展示",
-      "x": 1994.9440000000006,
-      "y": 58.42559999999963,
+      "x": 2075.565568,
+      "y": -189.41107200000027,
       "width": 321.0,
       "height": 237.0,
       "inputs": [
@@ -164,8 +164,8 @@
     {
       "module_id": "e4814ef1-29db-4939-b23a-168ef0e1b5fd",
       "module_type": "图片展示",
-      "x": 1974.9440000000006,
-      "y": 369.4255999999996,
+      "x": 2055.565568,
+      "y": 121.58892799999967,
       "width": 349.0,
       "height": 286.0,
       "inputs": [
@@ -190,8 +190,8 @@
     {
       "module_id": "91bfb187-0641-48a4-bc94-5bb85aa47191",
       "module_type": "打印显示",
-      "x": 2382.944000000005,
-      "y": 378.4255999999996,
+      "x": 2463.5655680000045,
+      "y": 130.58892799999967,
       "width": 415.0,
       "height": 275.0,
       "inputs": [
@@ -215,8 +215,8 @@
     {
       "module_id": "6a2a79b1-3b22-4c1e-b94a-e18c131d6c3f",
       "module_type": "打印显示",
-      "x": 2363.944000000005,
-      "y": 52.42559999999963,
+      "x": 2442.837568000004,
+      "y": -190.22707200000028,
       "width": 412.0,
       "height": 258.0,
       "inputs": [
@@ -240,8 +240,8 @@
     {
       "module_id": "6a992b31-a97f-4a85-8230-fc1e02a7b719",
       "module_type": "yolov8分类",
-      "x": 1685.9440000000002,
-      "y": 608.4255999999996,
+      "x": 1766.5655679999988,
+      "y": 360.5889279999995,
       "width": 189.0,
       "height": 99.0,
       "inputs": [
@@ -263,8 +263,8 @@
     {
       "module_id": "d9862de1-57ad-41a1-90f1-db841f8e3826",
       "module_type": "图片展示",
-      "x": 1968.9440000000006,
-      "y": 746.4255999999996,
+      "x": 2049.565568,
+      "y": 498.58892799999956,
       "width": 350.0,
       "height": 287.0,
       "inputs": [
@@ -289,8 +289,8 @@
     {
       "module_id": "077db32e-1309-4dc1-a1e6-a30f12ee7f54",
       "module_type": "打印显示",
-      "x": 2370.944000000005,
-      "y": 705.4255999999996,
+      "x": 2451.5655680000045,
+      "y": 457.58892799999956,
       "width": 550.0,
       "height": 244.0,
       "inputs": [
@@ -314,8 +314,8 @@
     {
       "module_id": "f74a61ab-27b5-4d36-9ba2-fa9d0d1669f0",
       "module_type": "逻辑",
-      "x": 1111.1392000000021,
-      "y": 1484.049600000001,
+      "x": 1268.9539840000016,
+      "y": 1047.487680000001,
       "width": 140.0,
       "height": 81.0,
       "inputs": [
@@ -331,8 +331,8 @@
     {
       "module_id": "55ab3691-55c3-48cd-b9ee-d594126e541a",
       "module_type": "文本输入",
-      "x": 738.1392000000008,
-      "y": 1597.049600000001,
+      "x": 895.9539840000004,
+      "y": 1160.487680000001,
       "width": 140.0,
       "height": 80.0,
       "inputs": [],
@@ -347,8 +347,8 @@
     {
       "module_id": "ee6e75d7-df92-421a-87ea-752d1907ae22",
       "module_type": "文本输入",
-      "x": 751.1392000000008,
-      "y": 1319.049600000001,
+      "x": 908.9539840000004,
+      "y": 882.4876800000009,
       "width": 140.0,
       "height": 80.0,
       "inputs": [],
@@ -363,8 +363,8 @@
     {
       "module_id": "5fc2bc2c-4544-4ad8-8a70-e54e262d551d",
       "module_type": "OK/NOK展示",
-      "x": 1370.1904000000009,
-      "y": 1344.2096000000015,
+      "x": 1528.0051839999999,
+      "y": 907.6476800000012,
       "width": 276.0,
       "height": 233.0,
       "inputs": [
@@ -387,8 +387,8 @@
     {
       "module_id": "4e0fe900-52e3-4893-8f25-bbb13d1dee5d",
       "module_type": "OK/NOK展示",
-      "x": 1368.4032000000018,
-      "y": 1622.2096000000013,
+      "x": 1526.217984000001,
+      "y": 1185.6476800000014,
       "width": 274.0,
       "height": 252.0,
       "inputs": [
@@ -411,8 +411,8 @@
     {
       "module_id": "23d52bbe-7380-4a60-b8e3-a5d3802f3a9f",
       "module_type": "逻辑",
-      "x": 1123.1392000000021,
-      "y": 1782.0496,
+      "x": 1280.9539840000016,
+      "y": 1345.4876799999997,
       "width": 140.0,
       "height": 80.0,
       "inputs": [
@@ -428,6 +428,125 @@
         "expr": "",
         "inputs_count": 2,
         "history_size": 20
+      },
+      "state": {}
+    },
+    {
+      "module_id": "e96b2e58-524e-4b8a-b0b6-d371002cb533",
+      "module_type": "modbus监听",
+      "x": 2363.0788888888883,
+      "y": 1159.8788888888885,
+      "width": 310.0,
+      "height": 133.0,
+      "inputs": [
+        "connect"
+      ],
+      "outputs": [
+        "value",
+        "edge"
+      ],
+      "config": {},
+      "state": {}
+    },
+    {
+      "module_id": "4db2aad8-1ce6-4018-a080-2c71a97f66f7",
+      "module_type": "modbus输出",
+      "x": 2296.162222222221,
+      "y": 1337.7122222222217,
+      "width": 246.0,
+      "height": 108.0,
+      "inputs": [
+        "connect",
+        "value"
+      ],
+      "outputs": [
+        "written",
+        "result"
+      ],
+      "config": {},
+      "state": {}
+    },
+    {
+      "module_id": "5cdbd9ea-4ae2-49bc-96bb-07ac2b6daaf9",
+      "module_type": "modbus连接",
+      "x": 2217.0788888888883,
+      "y": 922.4344444444441,
+      "width": 171.0,
+      "height": 113.0,
+      "inputs": [],
+      "outputs": [
+        "connect",
+        "status"
+      ],
+      "config": {},
+      "state": {}
+    },
+    {
+      "module_id": "e6c99c33-9b03-4f7a-b8e0-478e53cd3f37",
+      "module_type": "打印显示",
+      "x": 2526.0788888888883,
+      "y": 926.9066666666663,
+      "width": 162.91666666666652,
+      "height": 222.0,
+      "inputs": [
+        "data"
+      ],
+      "outputs": [
+        "text",
+        "changes"
+      ],
+      "config": {
+        "max_lines": 10,
+        "truncate": 200,
+        "prefix": "",
+        "update_mode": "every",
+        "interval_ms": 0,
+        "merge_dict": true,
+        "show_timestamp": true
+      },
+      "state": {}
+    },
+    {
+      "module_id": "a070435e-c199-40db-a149-8e4b6ff272c9",
+      "module_type": "路径选择器",
+      "x": 3257.7944444444433,
+      "y": 314.568888888889,
+      "width": 150.41666666666674,
+      "height": 60.0,
+      "inputs": [],
+      "outputs": [
+        "path"
+      ],
+      "config": {
+        "selection_mode": "directory",
+        "dialog_title": "选择路径",
+        "default_path": "D:/PROJECTS/FAHAI/yolov8n.pt",
+        "remember_last": true
+      },
+      "state": {}
+    },
+    {
+      "module_id": "b88ba77e-1287-4f9f-b37a-75d9845ce853",
+      "module_type": "打印显示",
+      "x": 3266.938888888888,
+      "y": 432.45555555555575,
+      "width": 258.05555555555543,
+      "height": 222.0,
+      "inputs": [
+        "data"
+      ],
+      "outputs": [
+        "text",
+        "changes"
+      ],
+      "config": {
+        "max_lines": 10,
+        "truncate": 200,
+        "prefix": "",
+        "update_mode": "every",
+        "interval_ms": 0,
+        "merge_dict": true,
+        "show_timestamp": true
       },
       "state": {}
     }
@@ -534,44 +653,94 @@
       "source_port": "result",
       "target_module": "4e0fe900-52e3-4893-8f25-bbb13d1dee5d",
       "target_port": "flag"
+    },
+    {
+      "source_module": "5cdbd9ea-4ae2-49bc-96bb-07ac2b6daaf9",
+      "source_port": "connect",
+      "target_module": "e96b2e58-524e-4b8a-b0b6-d371002cb533",
+      "target_port": "connect"
+    },
+    {
+      "source_module": "5cdbd9ea-4ae2-49bc-96bb-07ac2b6daaf9",
+      "source_port": "status",
+      "target_module": "e6c99c33-9b03-4f7a-b8e0-478e53cd3f37",
+      "target_port": "data"
+    },
+    {
+      "source_module": "5cdbd9ea-4ae2-49bc-96bb-07ac2b6daaf9",
+      "source_port": "connect",
+      "target_module": "4db2aad8-1ce6-4018-a080-2c71a97f66f7",
+      "target_port": "connect"
+    },
+    {
+      "source_module": "a070435e-c199-40db-a149-8e4b6ff272c9",
+      "source_port": "path",
+      "target_module": "b88ba77e-1287-4f9f-b37a-75d9845ce853",
+      "target_port": "data"
     }
   ],
   "groups": [
     {
       "group_id": "group_1",
       "title": "分组",
-      "x": 0.0,
-      "y": 0.0,
-      "width": 948.0512000000001,
-      "height": 595.1600000000003,
+      "x": 3237.7944444444433,
+      "y": 294.568888888889,
+      "width": 307.2000000000003,
+      "height": 379.8866666666669,
       "members": [
-        "5fc2bc2c-4544-4ad8-8a70-e54e262d551d",
-        "23d52bbe-7380-4a60-b8e3-a5d3802f3a9f",
-        "55ab3691-55c3-48cd-b9ee-d594126e541a",
-        "ee6e75d7-df92-421a-87ea-752d1907ae22",
-        "4e0fe900-52e3-4893-8f25-bbb13d1dee5d",
-        "f74a61ab-27b5-4d36-9ba2-fa9d0d1669f0"
+        "b88ba77e-1287-4f9f-b37a-75d9845ce853",
+        "a070435e-c199-40db-a149-8e4b6ff272c9"
       ]
     },
     {
       "group_id": "group_1",
-      "title": "1",
-      "x": 0.0,
-      "y": 0.0,
-      "width": 2153.605709876544,
+      "title": "modbus",
+      "x": 2197.0788888888883,
+      "y": 902.4344444444441,
+      "width": 514.0,
+      "height": 573.0,
+      "members": [
+        "e96b2e58-524e-4b8a-b0b6-d371002cb533",
+        "4db2aad8-1ce6-4018-a080-2c71a97f66f7",
+        "e6c99c33-9b03-4f7a-b8e0-478e53cd3f37",
+        "5cdbd9ea-4ae2-49bc-96bb-07ac2b6daaf9"
+      ]
+    },
+    {
+      "group_id": "group_1",
+      "title": "逻辑",
+      "x": 875.9539840000004,
+      "y": 862.4876800000009,
+      "width": 948.0511999999997,
+      "height": 595.1600000000003,
+      "members": [
+        "4e0fe900-52e3-4893-8f25-bbb13d1dee5d",
+        "23d52bbe-7380-4a60-b8e3-a5d3802f3a9f",
+        "f74a61ab-27b5-4d36-9ba2-fa9d0d1669f0",
+        "55ab3691-55c3-48cd-b9ee-d594126e541a",
+        "5fc2bc2c-4544-4ad8-8a70-e54e262d551d",
+        "ee6e75d7-df92-421a-87ea-752d1907ae22"
+      ]
+    },
+    {
+      "group_id": "group_2",
+      "title": "yolov8",
+      "x": 867.9598581234566,
+      "y": -215.41107200000027,
+      "width": 2153.6057098765477,
       "height": 1020.9999999999998,
       "members": [
-        "4de43783-7913-4f10-9ff9-06f72ac62519",
-        "6a992b31-a97f-4a85-8230-fc1e02a7b719",
-        "6a2a79b1-3b22-4c1e-b94a-e18c131d6c3f",
-        "5087fad0-88b7-4c8c-bbc0-bd7639d6d627",
-        "077db32e-1309-4dc1-a1e6-a30f12ee7f54",
-        "d9862de1-57ad-41a1-90f1-db841f8e3826",
-        "3fca569a-d164-4c13-a6eb-061b2a0ce989",
-        "d94a42ce-d52a-4bf9-99b6-1a0f6c269920",
-        "e4814ef1-29db-4939-b23a-168ef0e1b5fd",
-        "fe5ee180-741e-4398-9c09-b7994ed619fe",
         "91bfb187-0641-48a4-bc94-5bb85aa47191",
+        "fe5ee180-741e-4398-9c09-b7994ed619fe",
+        "077db32e-1309-4dc1-a1e6-a30f12ee7f54",
+        "6a2a79b1-3b22-4c1e-b94a-e18c131d6c3f",
+        "d9862de1-57ad-41a1-90f1-db841f8e3826",
+        "e4814ef1-29db-4939-b23a-168ef0e1b5fd",
+        "6a992b31-a97f-4a85-8230-fc1e02a7b719",
+        "3fca569a-d164-4c13-a6eb-061b2a0ce989",
+        "5087fad0-88b7-4c8c-bbc0-bd7639d6d627",
+        "4de43783-7913-4f10-9ff9-06f72ac62519",
+        "d94a42ce-d52a-4bf9-99b6-1a0f6c269920",
         "f3bcb00e-8c40-47a9-8f5f-c96d23cd705c"
       ]
     }

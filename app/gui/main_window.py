@@ -62,16 +62,25 @@ class MainWindow(QMainWindow):
         self._gpu_available = False
         self._pynvml = None
         self._gpu_handle = None
+        self._gpu_handles = []
         try:
             import pynvml
             pynvml.nvmlInit()
             count = pynvml.nvmlDeviceGetCount()
             if count > 0:
-                self._gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-                self._pynvml = pynvml
-                self._gpu_available = True
+                for i in range(count):
+                    try:
+                        h = pynvml.nvmlDeviceGetHandleByIndex(i)
+                        self._gpu_handles.append(h)
+                    except Exception:
+                        pass
+                if self._gpu_handles:
+                    self._gpu_handle = self._gpu_handles[0]
+                    self._pynvml = pynvml
+                    self._gpu_available = True
         except Exception:
             self._gpu_available = False
+        self._sysinfo_enabled = True
         
     def _init_ui(self):
         """初始化用户界面"""
@@ -241,6 +250,19 @@ class MainWindow(QMainWindow):
         about_action = QAction('关于(&A)', self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+        # 监控菜单
+        monitor_menu = menubar.addMenu('监控(&M)')
+        reset_metrics_action = QAction('重置性能指标', self)
+        reset_metrics_action.triggered.connect(self.reset_executor_metrics)
+        monitor_menu.addAction(reset_metrics_action)
+        toggle_sysinfo_action = QAction('系统信息轮询', self)
+        toggle_sysinfo_action.setCheckable(True)
+        toggle_sysinfo_action.setChecked(True)
+        toggle_sysinfo_action.triggered.connect(self._toggle_system_info)
+        monitor_menu.addAction(toggle_sysinfo_action)
+        grid_toggle_action = QAction('切换网格显示', self)
+        grid_toggle_action.triggered.connect(lambda: self.flow_canvas.toggle_grid())
+        monitor_menu.addAction(grid_toggle_action)
         
     def _init_toolbar(self):
         """初始化工具栏"""
@@ -271,7 +293,12 @@ class MainWindow(QMainWindow):
         self.gpu_bar.setFixedWidth(80)
         self.gpu_bar.setTextVisible(False)
         self.gpu_bar.setStyleSheet("QProgressBar { border:1px solid #bbb; background:#eee; } QProgressBar::chunk { background:#2196f3; }")
-        self.sysinfo_label = QLabel("CPU: --% | GPU: --")
+        self.disk_bar = QProgressBar()
+        self.disk_bar.setRange(0,100)
+        self.disk_bar.setFixedWidth(80)
+        self.disk_bar.setTextVisible(False)
+        self.disk_bar.setStyleSheet("QProgressBar { border:1px solid #bbb; background:#eee; } QProgressBar::chunk { background:#ff9800; }")
+        self.sysinfo_label = QLabel("CPU: --% | GPU: -- | Disk: --")
         self.sysinfo_label.setStyleSheet("QLabel { color: #555; padding-left:6px; }")
         self.metrics_label = QLabel("Exec: 0 | Avg: 0ms | Slow: -")
         self.metrics_label.setStyleSheet("QLabel { color:#444; padding-left:12px; }")
@@ -280,6 +307,8 @@ class MainWindow(QMainWindow):
         self.statusbar.addPermanentWidget(self.cpu_bar)
         self.statusbar.addPermanentWidget(QLabel("GPU"))
         self.statusbar.addPermanentWidget(self.gpu_bar)
+        self.statusbar.addPermanentWidget(QLabel("Disk"))
+        self.statusbar.addPermanentWidget(self.disk_bar)
         self.statusbar.addPermanentWidget(self.sysinfo_label)
         
     def _connect_signals(self):
@@ -533,6 +562,8 @@ class MainWindow(QMainWindow):
         gpu_mem_percent = None
         gpu_txt = 'None'
         cpu_txt = 'n/a'
+        disk_percent = None
+        disk_txt = 'n/a'
         # CPU
         try:
             import psutil
@@ -540,15 +571,23 @@ class MainWindow(QMainWindow):
             cpu_txt = f"{cpu_percent:.0f}%"
         except Exception:
             cpu_percent = None
-        # GPU - 优先 pynvml 全局显存与利用率
-        if self._gpu_available and self._pynvml and self._gpu_handle:
+        # GPU 多卡信息
+        if self._gpu_available and self._pynvml and self._gpu_handles:
+            segments = []
             try:
-                mem_info = self._pynvml.nvmlDeviceGetMemoryInfo(self._gpu_handle)
-                util_info = self._pynvml.nvmlDeviceGetUtilizationRates(self._gpu_handle)
-                used_mb = mem_info.used / 1024**2
-                total_mb = mem_info.total / 1024**2
-                gpu_mem_percent = (mem_info.used / mem_info.total) * 100.0 if mem_info.total else 0.0
-                gpu_txt = f"{used_mb:.0f}/{total_mb:.0f}MB {util_info.gpu}%"
+                for idx, h in enumerate(self._gpu_handles):
+                    try:
+                        mem_info = self._pynvml.nvmlDeviceGetMemoryInfo(h)
+                        util_info = self._pynvml.nvmlDeviceGetUtilizationRates(h)
+                        used_mb = mem_info.used / 1024**2
+                        total_mb = mem_info.total / 1024**2
+                        percent = (mem_info.used / mem_info.total) * 100.0 if mem_info.total else 0.0
+                        if idx == 0:
+                            gpu_mem_percent = percent
+                        segments.append(f"GPU{idx}:{used_mb:.0f}/{total_mb:.0f}MB {util_info.gpu}%")
+                    except Exception:
+                        segments.append(f"GPU{idx}:n/a")
+                gpu_txt = ' | '.join(segments)
             except Exception:
                 gpu_mem_percent = None
         else:
@@ -564,6 +603,18 @@ class MainWindow(QMainWindow):
                     gpu_txt = f"{name} {used_mb:.0f}/{total_mb:.0f}MB"
             except Exception:
                 gpu_mem_percent = None
+        # 磁盘 (使用当前工作目录所在分区)
+        try:
+            import psutil, pathlib
+            root_drive = pathlib.Path(os.getcwd()).anchor or os.getcwd()
+            usage = psutil.disk_usage(root_drive)
+            disk_percent = usage.percent
+            used_gb = usage.used / 1024**3
+            total_gb = usage.total / 1024**3
+            disk_txt = f"{used_gb:.1f}/{total_gb:.1f}GB {disk_percent:.0f}%"
+        except Exception:
+            disk_percent = None
+
         # 更新进度条
         if cpu_percent is not None:
             self.cpu_bar.setValue(int(cpu_percent))
@@ -575,7 +626,22 @@ class MainWindow(QMainWindow):
         else:
             self.gpu_bar.setValue(0)
             self.gpu_bar.setEnabled(False)
-        self.sysinfo_label.setText(f"CPU: {cpu_txt} | GPU: {gpu_txt}")
+        if disk_percent is not None:
+            self.disk_bar.setValue(int(disk_percent))
+            self.disk_bar.setEnabled(True)
+        else:
+            self.disk_bar.setValue(0)
+            self.disk_bar.setEnabled(False)
+        self.sysinfo_label.setText(f"CPU: {cpu_txt} | GPU: {gpu_txt} | Disk: {disk_txt}")
+
+    def _toggle_system_info(self, checked: bool):
+        self._sysinfo_enabled = bool(checked)
+        if self._sysinfo_enabled:
+            self._sysinfo_timer.start(); self._metrics_timer.start()
+            self.statusbar.showMessage('系统信息轮询已开启')
+        else:
+            self._sysinfo_timer.stop(); self._metrics_timer.stop()
+            self.statusbar.showMessage('系统信息轮询已关闭')
 
     # ---------- 性能指标刷新 ----------
     def _on_executor_metrics(self, nodes: dict, aggregate: dict):

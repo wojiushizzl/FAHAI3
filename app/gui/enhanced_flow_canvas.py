@@ -451,6 +451,32 @@ class ModuleItem(QGraphicsRectItem):
                 p.update_connections()
         return super().itemChange(change, value)
 
+    def paint(self, painter: QPainter, option, widget=None):
+        """自定义模块外观：圆角、渐变、选中高亮、阴影与标题栏分隔。"""
+        rect = self.rect()
+        painter.save()
+        # 背景渐变
+        base_color = QColor(200,220,255) if not self.isSelected() else QColor(180,210,250)
+        grad = QColor(base_color)
+        # 轻微阴影
+        shadow_rect = QRectF(rect.x()+2, rect.y()+2, rect.width(), rect.height())
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0,0,0,40))
+        painter.drawRoundedRect(shadow_rect, 6, 6)
+        # 主面板
+        painter.setBrush(QBrush(base_color))
+        border_color = QColor(100,150,200) if not self.isSelected() else QColor(50,110,180)
+        pen = QPen(border_color, 2 if not self.isSelected() else 3)
+        painter.setPen(pen)
+        painter.drawRoundedRect(rect, 6, 6)
+        # 标题栏分隔线
+        painter.setPen(QPen(QColor(120,150,190), 1))
+        from PyQt6.QtCore import QPointF as _QPF
+        painter.drawLine(_QPF(rect.left()+4, rect.top()+20), _QPF(rect.right()-4, rect.top()+20))
+        painter.restore()
+        # 让子项 (文本/端口) 正常绘制
+        super().paint(painter, option, widget)
+
 class ConnectionPoint(QGraphicsRectItem):
     def __init__(self, parent_item, point_type, x, y, port_name, canvas=None, size=10):
         super().__init__(0, 0, size, size, parent_item)
@@ -872,10 +898,12 @@ class EnhancedFlowCanvas(QGraphicsView):
         groups = []
         for g in self.list_groups():
             rect = g.rect()
+            # 使用 scenePos() 而不是 rect.x()/rect.y()，避免位置总是保存为 0 导致重载偏移
+            gpos = g.scenePos()
             groups.append({
                 'group_id': getattr(g,'group_id',''),
                 'title': g.title.toPlainText() if hasattr(g,'title') else '分组',
-                'x': rect.x(), 'y': rect.y(), 'width': rect.width(), 'height': rect.height(),
+                'x': gpos.x(), 'y': gpos.y(), 'width': rect.width(), 'height': rect.height(),
                 'members': g.members
             })
         return {'modules': modules, 'connections': links, 'groups': groups}

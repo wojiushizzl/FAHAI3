@@ -176,6 +176,28 @@ try:
 except Exception as e:
     pass
 
+# Modbus 系列模块
+try:
+    from .modbus.modbus_connect_module import ModbusConnectModule
+    register_module("modbus连接", ModbusConnectModule)
+except Exception:
+    pass
+try:
+    from .modbus.modbus_server_module import ModbusServerModule
+    register_module("modbus模拟服务器", ModbusServerModule)
+except Exception:
+    pass
+try:
+    from .modbus.modbus_listener_module import ModbusListenerModule
+    register_module("modbus监听", ModbusListenerModule)
+except Exception:
+    pass
+try:
+    from .modbus.modbus_write_module import ModbusWriteModule
+    register_module("modbus输出", ModbusWriteModule)
+except Exception:
+    pass
+
 # 自动加载外部插件
 _loaded_plugins = load_plugin_modules()
 if _loaded_plugins:

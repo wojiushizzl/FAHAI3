@@ -545,23 +545,88 @@ class PipelineExecutor:
             self.logger.info("执行循环结束")
             
     def _execute_sequential(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """顺序执行（端口驱动路由版本）"""
+        """顺序执行（端口驱动路由版本）
+        增强: adaptive 并发 (配置 adaptive_parallel=True 时)
+        同一层级的可阻塞模块 (may_block=True) 使用临时线程池并行执行；
+        其它保持顺序，避免破坏依赖与界面高亮节奏。
+        """
         current_data = input_data.copy()
-        for node_id in self.execution_order:
-            node = self.nodes[node_id]
-            node_inputs = self._prepare_node_inputs(node, current_data)
-            node.module.receive_inputs(node_inputs)
-            # 通知模块开始执行
-            self._notify_module_step(node_id, 'start')
-            start_time = time.time()
-            result = node.module.run_cycle()
-            node.execution_time = time.time() - start_time
-            self._record_perf(node.node_id, node.execution_time)
-            node.last_result = result
-            self._route_outputs(node, result, current_data)
-            # 通知模块结束执行
-            self._notify_module_step(node_id, 'end')
+        adaptive = bool(self.config.get('adaptive_parallel', False))
+        if not adaptive:
+            # 原始逻辑
+            for node_id in self.execution_order:
+                node = self.nodes[node_id]
+                node_inputs = self._prepare_node_inputs(node, current_data)
+                node.module.receive_inputs(node_inputs)
+                self._notify_module_step(node_id, 'start')
+                start_time = time.time()
+                result = node.module.run_cycle()
+                node.execution_time = time.time() - start_time
+                self._record_perf(node.node_id, node.execution_time)
+                node.last_result = result
+                self._route_outputs(node, result, current_data)
+                self._notify_module_step(node.node_id, 'end')
+            return current_data
+        # 自适应层级并发
+        levels = self._calculate_execution_levels()
+        for level in levels:
+            # 拆分 may_block 与普通
+            block_nodes = [nid for nid in level if getattr(self.nodes[nid].module.capabilities, 'may_block', False)]
+            normal_nodes = [nid for nid in level if nid not in block_nodes]
+            # 先并行执行 block_nodes
+            if block_nodes and len(block_nodes) > 1:
+                temp_pool = ThreadPoolExecutor(max_workers=min(len(block_nodes), self.config.get('max_workers', 4)))
+                futures: List[Future] = []
+                for nid in block_nodes:
+                    node = self.nodes[nid]
+                    node_inputs = self._prepare_node_inputs(node, current_data)
+                    node.module.receive_inputs(node_inputs)
+                    futures.append(temp_pool.submit(self._execute_node_return_route, node, current_data))
+                for f in futures:
+                    try:
+                        f.result(timeout=self.config.get('timeout', 30))
+                    except Exception as e:
+                        self.logger.error(f"自适应并发节点失败: {e}")
+                temp_pool.shutdown(wait=True)
+            else:
+                # 单个或无并发节点
+                for nid in block_nodes:
+                    node = self.nodes[nid]
+                    node_inputs = self._prepare_node_inputs(node, current_data)
+                    node.module.receive_inputs(node_inputs)
+                    self._notify_module_step(nid, 'start')
+                    t0 = time.time()
+                    result = node.module.run_cycle()
+                    node.execution_time = time.time() - t0
+                    self._record_perf(node.node_id, node.execution_time)
+                    node.last_result = result
+                    self._route_outputs(node, result, current_data)
+                    self._notify_module_step(nid, 'end')
+            # 顺序执行普通节点
+            for nid in normal_nodes:
+                node = self.nodes[nid]
+                node_inputs = self._prepare_node_inputs(node, current_data)
+                node.module.receive_inputs(node_inputs)
+                self._notify_module_step(nid, 'start')
+                t0 = time.time()
+                result = node.module.run_cycle()
+                node.execution_time = time.time() - t0
+                self._record_perf(node.node_id, node.execution_time)
+                node.last_result = result
+                self._route_outputs(node, result, current_data)
+                self._notify_module_step(nid, 'end')
         return current_data
+
+    def _execute_node_return_route(self, node: PipelineNode, current_data: Dict[str, Any]) -> None:
+        """辅助：在线程中执行节点并路由结果 (用于 adaptive 并发)。"""
+        self._notify_module_step(node.node_id, 'start')
+        t0 = time.time()
+        result = node.module.run_cycle()
+        node.execution_time = time.time() - t0
+        self._record_perf(node.node_id, node.execution_time)
+        node.last_result = result
+        self._route_outputs(node, result, current_data)
+        self._notify_module_step(node.node_id, 'end')
         
     def _execute_parallel(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """并行执行（端口驱动路由版本）"""
