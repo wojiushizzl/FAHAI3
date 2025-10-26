@@ -188,11 +188,14 @@ class ModuleItem(QGraphicsRectItem):
         if not self._thumb_item:
             return
         from PyQt6.QtGui import QImage, QPixmap
-        w = int(self.module_ref.config.get("width", 160)) if self.module_ref else 160
-        h = int(self.module_ref.config.get("height", 120)) if self.module_ref else 120
-        base_h = 30 + h + 10
-        if base_h > self.rect().height():
-            self.setRect(0, 0, max(self.rect().width(), w + 20), base_h)
+        # 使用当前矩形尺寸动态确定缩略图区域，而不是仅依赖配置 width/height
+        # 留出左右与标题区域的内边距
+        available_w = int(self.rect().width()) - 16  # 左右各留 8px
+        available_h = int(self.rect().height()) - 34  # 顶部标题 ~24px + 下方 10px 余量
+        if available_w < 20: available_w = 20
+        if available_h < 20: available_h = 20
+        w = available_w
+        h = available_h
         if img is None or not hasattr(img, 'shape'):
             placeholder = QImage(w, h, QImage.Format.Format_RGB32)
             placeholder.fill(QColor(230, 230, 230))
@@ -221,11 +224,15 @@ class ModuleItem(QGraphicsRectItem):
     def mouseDoubleClickEvent(self, event):
         if self._is_image_viewer and self.module_ref:
             cur_w = int(self.module_ref.config.get("width", 160))
-            cur_h = int(self.module_ref.config.get("height", 120))
+            # 根据当前配置切换预设尺寸，并同步更新矩形大小以立即反映缩略图变化
             if cur_w <= 160:
-                self.module_ref.configure({"width": 320, "height": 240})
+                new_w, new_h = 320, 240
             else:
-                self.module_ref.configure({"width": 160, "height": 120})
+                new_w, new_h = 160, 120
+            self.module_ref.configure({"width": new_w, "height": new_h})
+            # 画布矩形含标题与边距：宽度加 16， 高度加 34
+            self.setRect(0, 0, new_w + 16, new_h + 34)
+            self._relayout_ports()
             self.refresh_visual()
         elif self.module_type == "路径选择器" and self.module_ref:
             # 打开选择对话框
