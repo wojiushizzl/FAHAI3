@@ -1,0 +1,160 @@
+{
+  "modules": [
+    {
+      "module_id": "fe5ee180-741e-4398-9c09-b7994ed619fe",
+      "module_type": "图片导入",
+      "x": 23.394290123456813,
+      "y": 240.34555041152248,
+      "width": 140.0,
+      "height": 80.0,
+      "inputs": [
+        "control"
+      ],
+      "outputs": [
+        "image",
+        "path",
+        "index",
+        "timestamp"
+      ],
+      "config": {
+        "source_type": "file",
+        "path": "D:/PROJECTS/2024-03-30 115035.png",
+        "pattern": "*.jpg",
+        "recursive": false,
+        "loop": true,
+        "interval_ms": 0,
+        "resize": [],
+        "color_format": "BGR",
+        "sort": true,
+        "max_files": 0,
+        "file_list": []
+      },
+      "state": {}
+    },
+    {
+      "module_id": "f3bcb00e-8c40-47a9-8f5f-c96d23cd705c",
+      "module_type": "图片展示",
+      "x": 307.0,
+      "y": -12.0,
+      "width": 583.0,
+      "height": 537.0,
+      "inputs": [
+        "image"
+      ],
+      "outputs": [
+        "image",
+        "meta"
+      ],
+      "config": {
+        "width": 563,
+        "height": 497,
+        "maintain_aspect": true,
+        "downscale_only": true,
+        "update_mode": "on_change",
+        "interval_ms": 0,
+        "channel_format": "BGR",
+        "autoskip_error": true
+      },
+      "state": {}
+    },
+    {
+      "module_id": "406b5d89-926a-4e5a-98c2-2754989e7e6b",
+      "module_type": "打印",
+      "x": 363.0,
+      "y": 563.0,
+      "width": 184.0,
+      "height": 200.0,
+      "inputs": [
+        "text"
+      ],
+      "outputs": [
+        "printed_text"
+      ],
+      "config": {},
+      "state": {
+        "last_text": "D:/PROJECTS/2024-03-30 115035.png"
+      }
+    },
+    {
+      "module_id": "e772fb36-b359-496b-a6ff-d1bda5e63751",
+      "module_type": "保存图片",
+      "x": 1070.0,
+      "y": 210.0,
+      "width": 211.0,
+      "height": 198.0,
+      "inputs": [
+        "image",
+        "path"
+      ],
+      "outputs": [
+        "path",
+        "index",
+        "timestamp",
+        "status"
+      ],
+      "config": {
+        "output_dir": "outputs/images",
+        "filename_pattern": "frame_{index:05d}.png",
+        "create_dir": true,
+        "overwrite": true,
+        "image_format": "PNG",
+        "quality": 95,
+        "update_mode": "every",
+        "interval_ms": 0,
+        "downscale_max": 0
+      },
+      "state": {}
+    },
+    {
+      "module_id": "4de43783-7913-4f10-9ff9-06f72ac62519",
+      "module_type": "打印显示",
+      "x": 560.0,
+      "y": 570.0,
+      "width": 697.0,
+      "height": 157.0,
+      "inputs": [
+        "data"
+      ],
+      "outputs": [
+        "text",
+        "changes"
+      ],
+      "config": {
+        "max_lines": 10,
+        "truncate": 200,
+        "prefix": "",
+        "update_mode": "every",
+        "interval_ms": 0,
+        "merge_dict": true,
+        "show_timestamp": true
+      },
+      "state": {}
+    }
+  ],
+  "connections": [
+    {
+      "source_module": "fe5ee180-741e-4398-9c09-b7994ed619fe",
+      "source_port": "image",
+      "target_module": "f3bcb00e-8c40-47a9-8f5f-c96d23cd705c",
+      "target_port": "image"
+    },
+    {
+      "source_module": "fe5ee180-741e-4398-9c09-b7994ed619fe",
+      "source_port": "path",
+      "target_module": "406b5d89-926a-4e5a-98c2-2754989e7e6b",
+      "target_port": "text"
+    },
+    {
+      "source_module": "f3bcb00e-8c40-47a9-8f5f-c96d23cd705c",
+      "source_port": "image",
+      "target_module": "e772fb36-b359-496b-a6ff-d1bda5e63751",
+      "target_port": "image"
+    },
+    {
+      "source_module": "406b5d89-926a-4e5a-98c2-2754989e7e6b",
+      "source_port": "printed_text",
+      "target_module": "4de43783-7913-4f10-9ff9-06f72ac62519",
+      "target_port": "data"
+    }
+  ]
+}

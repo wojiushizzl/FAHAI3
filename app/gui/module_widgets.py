@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+GUI 模块控件
+包含相机、触发、模型、后处理等模块的控件定义
+"""
+
+from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QLineEdit, QApplication)
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData
+from PyQt6.QtGui import QDrag, QPixmap, QIcon, QPainter, QShortcut, QKeySequence, QColor
+from app.pipeline.module_registry import list_registered_modules, get_module_class
+from app.pipeline.base_module import ModuleType
+
+
+class ModuleToolbox(QWidget):
+    """模块工具箱树状+搜索+拖拽+快捷键"""
+    module_selected = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedWidth(240)
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("搜索模块 (Ctrl+F)...")
+        self.search_box.textChanged.connect(self._filter_tree)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.itemDoubleClicked.connect(self._on_item_activate)
+        self.tree.itemClicked.connect(self._on_item_clicked)
+        self.tree.setDragEnabled(True)
+        self.tree.viewport().setAcceptDrops(False)
+        self.tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
+        layout = QVBoxLayout(self)
+        title = QLabel("模块工具箱")
+        title.setStyleSheet("""QLabel {font-weight:bold;font-size:14px;padding:6px;background:#f0f0f0;border-bottom:1px solid #ccc;}""")
+        layout.addWidget(title)
+        layout.addWidget(self.search_box)
+        layout.addWidget(self.tree)
+        layout.addStretch()
+        # 快捷键
+        QShortcut(QKeySequence("Ctrl+F"), self, activated=lambda: self.search_box.setFocus())
+        QShortcut(QKeySequence("Return"), self, activated=self._add_selected_via_enter)
+        QShortcut(QKeySequence("Ctrl+R"), self, activated=self.refresh_modules)
+        self.refresh_modules()
+
+    def refresh_modules(self):
+        self.tree.clear()
+        groups = {
+            '输入': [],
+            '处理': [],
+            '输出': [],
+            '自定义': []
+        }
+        for display in list_registered_modules():
+            cls = get_module_class(display)
+            if not cls:
+                groups['自定义'].append(display)
+                continue
+            try:
+                mtype = cls(name=display).module_type
+            except Exception:
+                mtype = ModuleType.CUSTOM
+            if mtype == ModuleType.CAMERA or mtype == ModuleType.TRIGGER:
+                groups['输入'].append(display)
+            elif mtype == ModuleType.MODEL:
+                groups['处理'].append(display)
+            elif mtype == ModuleType.POSTPROCESS:
+                groups['输出'].append(display)
+            else:
+                groups['自定义'].append(display)
+
+        for gname, items in groups.items():
+            if not items:
+                continue
+            gnode = QTreeWidgetItem([gname])
+            gnode.setFlags(gnode.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
+            self.tree.addTopLevelItem(gnode)
+            for mod in sorted(items):
+                inode = QTreeWidgetItem([mod])
+                inode.setData(0, Qt.ItemDataRole.UserRole, mod)
+                inode.setIcon(0, self._make_icon(mod))
+                gnode.addChild(inode)
+            gnode.setExpanded(True)
+        self.tree.resizeColumnToContents(0)
+        self._filter_tree(self.search_box.text())
+
+    def _make_icon(self, name: str) -> QIcon:
+        cls = get_module_class(name)
+        try:
+            module_type = cls(name=name).module_type if cls else ModuleType.CUSTOM
+        except Exception:
+            module_type = ModuleType.CUSTOM
+        color_map = {
+            ModuleType.CAMERA: '#4CAF50',
+            ModuleType.TRIGGER: '#FF9800',
+            ModuleType.MODEL: '#9C27B0',
+            ModuleType.POSTPROCESS: '#F44336',
+            ModuleType.CUSTOM: '#2196F3'
+        }
+        col = color_map.get(module_type, '#607D8B')
+        px = QPixmap(16,16)
+        px.fill(Qt.GlobalColor.transparent)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setBrush(Qt.GlobalColor.white)
+        p.setPen(Qt.GlobalColor.transparent)
+        p.drawRect(0,0,16,16)
+        p.setBrush(Qt.GlobalColor.transparent)
+        p.setPen(Qt.GlobalColor.transparent)
+        # colored circle
+        p.setBrush(Qt.GlobalColor.white)
+        p.setPen(Qt.GlobalColor.transparent)
+        p.drawEllipse(0,0,16,16)
+        p.setBrush(Qt.GlobalColor.white)
+        p.drawEllipse(2,2,12,12)
+        p.setBrush(Qt.GlobalColor.transparent)
+        # overlay color ring
+        p.setPen(Qt.GlobalColor.transparent)
+        p.setBrush(Qt.GlobalColor.transparent)
+        p.end()
+        # simple solid color fill rectangle for now
+        p2 = QPainter(px)
+        p2.fillRect(2,2,12,12, Qt.GlobalColor.white)
+        p2.fillRect(2,2,12,12, QColor(col))
+        p2.end()
+        return QIcon(px)
+
+    def _filter_tree(self, text: str):
+        text = text.strip().lower()
+        for i in range(self.tree.topLevelItemCount()):
+            gnode = self.tree.topLevelItem(i)
+            any_visible = False
+            for j in range(gnode.childCount()):
+                inode = gnode.child(j)
+                name = inode.data(0, Qt.ItemDataRole.UserRole)
+                visible = (not text) or (name and text in name.lower())
+                inode.setHidden(not visible)
+                if visible:
+                    any_visible = True
+            gnode.setHidden(not any_visible)
+
+    def _on_item_activate(self, item: QTreeWidgetItem, col: int):
+        name = item.data(0, Qt.ItemDataRole.UserRole)
+        if name:
+            self.module_selected.emit(name)
+
+    def _on_item_clicked(self, item: QTreeWidgetItem, col: int):
+        name = item.data(0, Qt.ItemDataRole.UserRole)
+        if name:
+            self.module_selected.emit(name)
+
+    def _add_selected_via_enter(self):
+        item = self.tree.currentItem()
+        if not item:
+            return
+        name = item.data(0, Qt.ItemDataRole.UserRole)
+        if name:
+            self.module_selected.emit(name)
+
+    def startDrag(self, supportedActions):
+        item = self.tree.currentItem()
+        if not item:
+            return
+        name = item.data(0, Qt.ItemDataRole.UserRole)
+        if not name:
+            return
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData('application/x-fahai-module', name.encode('utf-8'))
+        # 端口预览：实例化类
+        cls = get_module_class(name)
+        ports_str = ''
+        if cls:
+            try:
+                inst = cls(name=name)
+                ins = ','.join(inst.input_ports.keys())
+                outs = ','.join(inst.output_ports.keys())
+                ports_str = f"{ins}|{outs}"
+                mime.setData('application/x-fahai-ports', ports_str.encode('utf-8'))
+            except Exception:
+                pass
+        mime.setText(name)
+        drag.setMimeData(mime)
+        px = QPixmap(140, 40)
+        px.fill(Qt.GlobalColor.white)
+        p = QPainter(px)
+        p.drawRect(0,0,139,39)
+        p.drawText(4,16, name)
+        if ports_str:
+            p.drawText(4,32, ports_str)
+        p.end()
+        drag.setPixmap(px)
+        drag.exec(Qt.DropAction.CopyAction)

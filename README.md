@@ -1,0 +1,316 @@
+# FAHAI 图形化流程设计器
+
+一个基于 PyQt6 的可视化流程编排与执行原型，支持模块动态端口反射、拖拽连线、执行器桥接、运行控制（运行/暂停/恢复/停止）、数据注入以及流程的保存与加载。
+
+## 核心概念
+
+### BaseModule
+所有模块继承自 `app/pipeline/base_module.py` 中的 `BaseModule`：
+- 标准生命周期：`start / stop / pause / resume / reset`
+- IO 接口：`register_input_port` / `register_output_port`、`receive_inputs`、`produce_outputs`、`run_cycle`
+- 扩展点：`_define_ports()` 定义端口；`process(inputs)` 完成一次业务处理；`_on_configure(config)` 自定义配置应用。
+- `config`：可选 pydantic 校验。若模块定义 `ConfigModel`（继承自 `pydantic.BaseModel`）则 `configure()` 会执行严格验证后写入。
+- 能力系统：模块可覆盖 `CAPABILITIES = ModuleCapabilities(...)` 用于调度与 UI 展示。
+
+### 端口定义格式
+```python
+self.register_input_port("text", port_type="string", desc="输入文本", required=True)
+self.register_output_port("delayed_text", port_type="string", desc="延时后的文本")
+```
+字段说明：
+- name: 端口名称（字符串，唯一）
+- port_type: 逻辑类型标记（string / image / generic / ...）
+- desc: 端口描述
+- required (仅输入): 是否必需输入
+
+### 模块状态 & 配置
+`get_status()` 默认返回：
+```json
+{
+  "module_id": "uuid",
+  "name": "模块名称",
+  "type": "custom|camera|...",
+  "status": "idle|running|paused|error|stopped",
+  "config": {"...": "..."},
+  "errors": [],
+  "input_ports": {"port_name": {"type": "string", "desc": ""}},
+  "output_ports": {"port_name": {"type": "string", "desc": ""}},
+  "current_inputs": ["..."],
+  "current_outputs": ["..."],
+  "capabilities": {
+    "supports_async": false,
+    "supports_batch": false,
+    "may_block": false,
+    "resource_tags": [],
+    "throughput_hint": 0.0
+  }
+}
+```
+自定义模块可覆盖 `get_status()` 添加专属字段（例如延时模块的 `delay_seconds`）。
+
+### GUI 组成
+- `EnhancedFlowCanvas`: 模块放置与端口连线；拖拽输出点到输入点生成连接。提供 `export_structure()`、`build_executor(executor)`、`save_to_file(path)`、`load_from_file(path)`。
+- `DockPanel`: 左侧工具箱与属性编辑。已为“文本输入”“打印”模块提供特化面板，可实时更新文本或查看最后打印。
+- `MainWindow`: 整体窗口，集成运行控制工具栏与菜单。执行器生命周期与后台馈送线程在此管理。
+
+### 执行器 PipelineExecutor
+路径 `app/pipeline/pipeline_executor.py`：
+- 支持执行模式：顺序 (SEQUENTIAL) / 并行 (PARALLEL) / 流水线 (PIPELINE, 当前等同顺序)。
+- 节点表示 `PipelineNode`，包含模块引用、前驱/后继、执行时间与最后结果缓存。
+- 连接统一使用 `Connection` 数据对象：`source_module/source_port -> target_module/target_port`。
+- 路由逻辑：执行结果写入全局上下文并根据显示连接将输出推送到目标模块的输入缓冲。
+- 回调：`add_progress_callback`、`add_result_callback`、`add_error_callback`。
+
+## 流程保存格式 (JSON)
+`EnhancedFlowCanvas.export_structure()` 输出：
+```json
+{
+  "modules": [
+    {
+      "module_id": "文本输入_xxx",
+      "module_type": "文本输入",
+      "x": 320.0,
+      "y": 180.0,
+      "inputs": [],
+      "outputs": ["text"],
+      "config": {},
+      "state": {"text_value": "Hello"}
+    }
+  ],
+  "connections": [
+    {
+      "source_module": "文本输入_xxx",
+      "source_port": "text",
+      "target_module": "打印_yyy",
+      "target_port": "text"
+    }
+  ]
+}
+```
+字段：
+- modules[].state: 按已知模块特化抓取（示例：`text_value`, `last_text`）。
+- modules[].config: 来自模块的 `config` 字典。
+- connections: 显式端口级别连线记录。
+
+## 扩展模块示例：延时模块
+新增文件 `app/pipeline/delay_module.py`：
+```python
+class DelayModule(BaseModule):
+    def _define_ports(self):
+        self.register_input_port("text", port_type="string", desc="输入文本", required=True)
+        self.register_output_port("delayed_text", port_type="string", desc="延时后的文本")
+    def process(self, inputs):
+        txt = inputs.get("text")
+        if txt is None: return {"delayed_text": "(无输入)"}
+        time.sleep(self.delay_seconds)
+        return {"delayed_text": txt}
+    def _on_configure(self, config):
+        if "delay_seconds" in config:
+            self.delay_seconds = max(0.0, float(config["delay_seconds"]))
+```
+注册：在 `module_registry.py` 添加：
+```python
+from .delay_module import DelayModule
+register_module("延时", DelayModule)
+```
+使用：右键画布 -> 添加“延时”模块；与“文本输入”/“打印”组合，形成：文本输入(text) -> 延时(text->delayed_text) -> 打印(text)
+(需先在延时模块与打印模块之间建立正确端口映射：目前打印模块期望输入端口名 text，可通过中转时在执行器阶段路由或创建一个简单“重命名”模块。)
+
+## 添加新模块步骤摘要
+1. 创建文件继承 `BaseModule`。
+2. 在 `_define_ports()` 中注册输入/输出端口。
+3. 实现 `process()` 返回 dict。
+4. 可选：实现 `_on_configure()` 解析自定义配置。
+5. 更新 `module_registry.py` 调用 `register_module("显示名", ModuleClass)`。
+6. 运行应用，右键画布添加模块；属性面板可根据需要扩展显示。
+
+## 常见配置字段建议
+| 字段名 | 用途 | 类型 | 说明 |
+|--------|------|------|------|
+| delay_seconds | 延时模块延迟 | float | >=0，秒 |
+| text | 文本输入初始值 | string | 配置或 UI 编辑覆盖 |
+| confidence_threshold | 模型置信度阈值 | float | [0,1] 范围 |
+| fps | 相机帧率 | int | 采集速率 |
+| exposure_ms | 相机曝光时间 | float | 毫秒 |
+
+## 运行控制
+工具栏与菜单提供：
+- 运行(F5)：构建执行器并开始循环。
+- 暂停(F6)：暂停执行线程（保留队列）。
+- 恢复(F7)：继续执行。
+- 停止(F8)：终止执行器与馈送线程。
+- 注入数据：弹窗输入 key/value 发送到 `input_queue`。
+- 编辑模块：当前“文本输入”模块快速修改文本。
+
+## 测试
+示例测试文件：`tests/test_build_executor.py` 与 `tests/test_build_executor_unittest.py` 包含：
+- 模块与连接数量验证
+- ID 唯一性验证
+- 序列化保存/加载回环一致性
+
+（若当前测试运行工具未识别，可改用手动脚本或集成 pytest 调度。）
+
+## 能力系统 (ModuleCapabilities)
+字段说明：
+- supports_async: 模块内部是否用线程/协程异步工作（例如相机采集）。
+- supports_batch: 是否可接收批量输入（模型推理、后处理等）。
+- may_block: 是否可能出现阻塞（网络 / IO / CPU 密集）。
+- resource_tags: 标签用于分组或调度筛选（camera / model / logic / ...）。
+- throughput_hint: 粗略吞吐提示（每秒处理帧/次数），用于 UI 和调度策略参考。
+
+模块覆盖示例：
+```python
+class CameraModule(BaseModule):
+  CAPABILITIES = ModuleCapabilities(supports_async=True, may_block=True, resource_tags=["camera"], throughput_hint=30.0)
+```
+
+## 配置模型 (ConfigModel)
+在模块类内定义：
+```python
+class LogicModule(BaseModule):
+  class ConfigModel(BaseModel):
+    op: str = "AND"
+    inputs_count: int = 2
+```
+调用：`logic.configure({"op": "OR", "inputs_count": 3})` —— 自动校验失败会返回 False 并记录错误。
+
+## 自动生成配置面板
+GUI 属性面板会优先尝试读取模块的 `ConfigModel.__fields__`，为每个字段生成相应控件（int -> QSpinBox, float -> QDoubleSpinBox, bool -> QCheckBox, str -> QLineEdit，复杂结构 -> QTextEdit）。点击“应用”后调用 `module.configure()` 完成校验与更新。
+
+## 外部插件
+通过 Python entry points 发现并注册模块：
+在外部包的 `pyproject.toml` 或 `setup.cfg` 中声明：
+```toml
+[project.entry-points."fahai.modules"]
+自定义模块显示名 = "your_package.module:YourModuleClass"
+```
+启动时 `module_registry.load_plugin_modules()` 会加载并调用 `register_module(display_name, klass)`。
+
+## 后续可扩展方向
+- 并行/流水线真实实现（管道队列分层执行）
+- 连接有效性校验（类型匹配）
+- 执行监控面板（吞吐/延迟折线图）
+- 自定义模块热加载 (watch + importlib.reload)
+- 端口类型注册 & 可视化颜色编码
+- 更丰富的表单控件（枚举下拉、列表编辑、嵌套结构 JSON 编辑器）
+
+---
+欢迎继续提出需要的特性或改进方向。
+
+## 目录结构更新（模块分类）
+
+已将原先平铺在 `app/pipeline/` 下的模块按功能分类迁移：
+
+```
+app/pipeline/
+  base_module.py
+  module_registry.py
+  pipeline_executor.py
+  camera/            # 相机相关模块
+    camera_module.py
+    image_import_module.py   # 图片导入/播放模块 (离线帧来源)
+  model/             # 模型推理模块
+    model_module.py
+  trigger/           # 触发控制模块
+    trigger_module.py
+  postprocess/       # 推理结果后处理模块
+    postprocess_module.py
+  custom/            # 通用/演示/辅助模块集合
+    text_input_module.py
+    print_module.py
+    delay_module.py
+    logic_module.py
+    image_display_module.py   # 图片展示模块 (画布缩略图显示)
+```
+
+兼容占位文件现已移除（`camera_module.py`、`model_module.py` 等已删除），请统一使用分类路径导入：
+
+```
+from app.pipeline.camera.camera_module import CameraModule
+from app.pipeline.model.model_module import ModelModule
+from app.pipeline.trigger.trigger_module import TriggerModule
+from app.pipeline.postprocess.postprocess_module import PostprocessModule
+from app.pipeline.custom.logic_module import LogicModule
+```
+
+说明：流程保存格式仅使用显示名，不受这一结构调整影响。若您有旧脚本，请更新导入路径；否则将出现 `ModuleNotFoundError`。
+
+迁移的好处：
+- 更清晰的分层（采集 / 推理 / 触发 / 后处理 / 自定义）。
+- 便于后续扩展同类别多实现（例如多个 CameraModule 子类）。
+- 减少主目录文件拥挤，提高可维护性。
+
+如果你需要添加新的模块类别，只需：
+1. 创建新子目录与 `__init__.py`。  
+2. 放置模块实现。  
+3. 在 `module_registry.py` 中按分组方式尝试导入并注册显示名。  
+4. （可选）定义 `ConfigModel` 与 `CAPABILITIES` 改善校验与调度。  
+5. （可选）发布为插件：添加 entry point 到 `fahai.modules`。  
+
+
+### 新增：图片导入模块 (ImageImportModule)
+
+用于将磁盘图片作为“相机帧”顺序或循环发送，使用场景：
+- 离线复现生产样品批次
+- 无真实相机场景下调试模型/后处理
+- 对比不同预处理参数影响
+
+主要配置字段：
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| source_type | file/directory/pattern/list | directory |
+| path | 单文件或目录路径 | D:/images |
+| pattern | 匹配模式 | *.png |
+| recursive | 目录/模式递归 | True |
+| loop | 播放结束后循环 | True |
+| interval_ms | 两帧最小间隔(ms) | 33 |
+| resize | 可选缩放 [w,h] | [640,480] |
+| color_format | BGR/RGB/GRAY | RGB |
+| max_files | 最大文件数 (0=不限) | 0 |
+| file_list | source_type=list 时使用 | ["a.jpg","b.jpg"] |
+
+输出端口：`image` (numpy)、`path`、`index`、`timestamp`。
+
+提示：`interval_ms` > 0 时若未到间隔返回空 `{}`；读取失败返回 `{"error": "读取失败: xxx"}`。与模型模块串联可实现离线批量推理评估。
+
+### 新增：图片展示模块 (ImageDisplayModule)
+
+用途：在流程画布中直接显示输入图像的缩略图，支持双击在 160x120 与 320x240 之间切换，方便快速观察流经的帧内容。
+
+配置字段：
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| width | 缩略宽度 | 160 |
+| height | 缩略高度 | 120 |
+| maintain_aspect | 保持原图比例（当前占位，后续扩展） | True |
+| downscale_only | 只缩小不放大（当前占位） | True |
+| update_mode | 刷新模式 on_change/interval | on_change |
+| interval_ms | 间隔模式下最小刷新间隔(ms) | 100 |
+| channel_format | 输入颜色假定 BGR/RGB/GRAY | BGR |
+| autoskip_error | 非图像输入静默跳过 | True |
+
+端口：
+| 输入端口 | 类型 | 说明 |
+|----------|------|------|
+| image | frame | 上游图像帧 |
+
+| 输出端口 | 类型 | 说明 |
+|----------|------|------|
+| image | frame | 原样输出图像（可继续传下游） |
+| meta | meta | 显示元信息（shape/changes/timestamp） |
+
+使用：右键菜单暂未列出，可通过工具箱添加显示名“图片展示”。与“图片导入”或“相机”模块连接其 image -> image 端口即可。执行后画布中模块会显示缩略图。
+
+注意：当前缩略图刷新是通过结果回调/模块输出刷新机制调用 `refresh_visual()`（如果未自动刷新，可在后续加入集中更新定时器）。
+
+### 交互增强：模块可调整大小 & 路径字段浏览
+
+近期新增：
+1. 画布中模块支持拖拽右/下边缘或右下角斜对角进行缩放（最小尺寸 100x60）。图片展示模块缩放后缩略图区域自动适配。双击图片展示模块仍可快速切换预设尺寸。
+2. 自动生成配置面板中凡是字段名以 `path` 或 `_path` 结尾的字符串都提供“浏览...”按钮，可直接选择文件或目录，减少手动输入路径错误。
+
+后续可扩展：
+- 记忆单模块上次尺寸
+- 路径字段区分文件/目录（通过额外 schema 标记）
+- 自适应端口标签布局防止拥挤或换行显示
+
