@@ -473,6 +473,34 @@ class ModuleItem(QGraphicsRectItem):
         painter.setPen(QPen(QColor(120,150,190), 1))
         from PyQt6.QtCore import QPointF as _QPF
         painter.drawLine(_QPF(rect.left()+4, rect.top()+20), _QPF(rect.right()-4, rect.top()+20))
+        # 状态徽章绘制（错误/警告/缓存）
+        status_color = None
+        label_text = ''
+        if self.module_ref:
+            # 简单规则：存在 last_error -> 错误；有警告列表 -> 警告；输出未变化超过 N 次 -> 缓存
+            try:
+                if getattr(self.module_ref, 'last_error', None):
+                    status_color = QColor(220,40,40); label_text = 'E'
+                elif getattr(self.module_ref, 'warnings', None):
+                    wlist = getattr(self.module_ref, 'warnings')
+                    if isinstance(wlist, (list, tuple)) and len(wlist) > 0:
+                        status_color = QColor(255,170,0); label_text = 'W'
+                # 缓存标记（输出哈希重复次数）
+                rep = getattr(self.module_ref, '_repeat_outputs_count', 0)
+                if status_color is None and rep >= 5:
+                    status_color = QColor(140,140,140); label_text = 'C'
+            except Exception:
+                pass
+        if status_color:
+            badge_rect = QRectF(rect.right()-18, rect.top()+2, 16, 16)
+            painter.setBrush(QBrush(status_color))
+            painter.setPen(QPen(QColor(255,255,255), 1))
+            painter.drawEllipse(badge_rect.center(), 8, 8)
+            if label_text:
+                painter.setPen(QPen(QColor(255,255,255)))
+                f = QFont('Arial', 8, QFont.Weight.Bold)
+                painter.setFont(f)
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, label_text)
         painter.restore()
         # 让子项 (文本/端口) 正常绘制
         super().paint(painter, option, widget)
@@ -1309,6 +1337,13 @@ class EnhancedFlowCanvas(QGraphicsView):
                 self._exec_highlight_original[module_id] = (item.brush(), item.pen())
             item.setBrush(QBrush(QColor(255, 240, 180)))
             item.setPen(QPen(QColor(255, 180, 0), 3))
+            # 连接线数据流激活：源模块所有输出连接标记为 active
+            for p in getattr(item, 'output_points', []):
+                for line in getattr(p, 'connections', []):
+                    try:
+                        line.set_status('active')
+                    except Exception:
+                        pass
         elif phase == 'end':
             # 如果未缓存原始样式，忽略恢复
             original = self._exec_highlight_original.get(module_id)
@@ -1325,6 +1360,13 @@ class EnhancedFlowCanvas(QGraphicsView):
                 # 清除缓存
                 if module_id in self._exec_highlight_original:
                     del self._exec_highlight_original[module_id]
+                # 在结束阶段，恢复连接线状态为 normal（若仍存在）
+                for p in getattr(item, 'output_points', []):
+                    for line in getattr(p, 'connections', []):
+                        try:
+                            line.set_status('normal')
+                        except Exception:
+                            pass
             QTimer.singleShot(220, _restore)
 
     def _refresh_image_viewers(self):

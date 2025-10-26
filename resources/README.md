@@ -1,211 +1,218 @@
-# FAHAI 项目资源说明
+<div align="center">
 
-本目录包含 FAHAI 图形化流程设计器的所有资源文件。
+# FAHAI 图形化工业视觉与流程编排平台
 
-## 目录结构
+简洁拖拽、可视连线、工业协议（Modbus）、YOLOv8 模型推理、执行性能监控与自适应并行调度。
 
-```
-resources/
-├── icons/          # 图标文件
-├── styles/         # 样式表文件
-├── images/         # 图片资源
-├── fonts/          # 字体文件
-├── themes/         # 主题配置
-└── README.md       # 本说明文件
-```
+</div>
 
-## 图标资源 (icons/)
+## 目录
+1. 项目简介  
+2. 主要特性速览  
+3. 快速开始  
+4. 核心概念  
+5. 模块分类与功能一览  
+6. YOLOv8 系列模块  
+7. 图像/文本/OK/NOK 展示模块  
+8. 保存图片模块详解  
+9. 打印显示模块详解  
+10. 路径选择器模块  
+11. Modbus 全套模块 (连接 / 监听 / 写入 / 模拟服务器)  
+12. 自适应并行执行与性能指标  
+13. 画布与操作（缩放/分组/复制/撤销）  
+14. 状态与系统资源监控 (CPU/GPU/磁盘)  
+15. 数据/工程持久化 (保存/加载)  
+16. 常见问题排查  
+17. 未来规划  
+18. 资源目录说明  
+19. 许可与版权  
 
-包含应用程序使用的所有图标文件，建议使用 SVG 格式以支持高DPI显示。
+---
 
-推荐图标：
-- app_icon.svg/png - 应用程序图标
-- camera.svg - 相机模块图标
-- trigger.svg - 触发模块图标
-- model.svg - 模型模块图标
-- postprocess.svg - 后处理模块图标
-- play.svg - 运行按钮图标
-- stop.svg - 停止按钮图标
-- pause.svg - 暂停按钮图标
-- settings.svg - 设置图标
-- connect.svg - 连接图标
-- disconnect.svg - 断开图标
+## 1. 项目简介
+FAHAI 是一个基于 PyQt6 的图形化流程设计与运行平台，面向视觉检测与轻工业自动化场景：通过“模块 + 端口 + 连接”的方式快速搭建图像处理、模型推理与工业协议交互流水线。支持运行一次、连续运行、暂停/恢复、性能度量、系统资源监控与项目持久化。
 
-## 样式表 (styles/)
-
-包含 Qt 样式表文件，用于定制应用程序外观。
-
-推荐样式文件：
-- main.qss - 主要样式表
-- dark_theme.qss - 深色主题
-- light_theme.qss - 浅色主题
-- module_widgets.qss - 模块控件样式
-- canvas.qss - 画布样式
-
-## 图片资源 (images/)
-
-包含应用程序使用的图片文件。
-
-推荐图片：
-- splash_screen.png - 启动画面
-- background.png - 背景图片
-- logo.png - 项目标志
-
-## 字体文件 (fonts/)
-
-包含自定义字体文件。
-
-## 主题配置 (themes/)
-
-包含主题配置文件，定义不同主题的颜色方案和样式设置。
-
-## 使用方法
-
-在代码中使用资源文件的示例：
-
-```python
-import os
-from PyQt6.QtGui import QIcon, QPixmap
-
-# 获取资源路径
-def get_resource_path(filename):
-    return os.path.join(os.path.dirname(__file__), '..', 'resources', filename)
-
-# 加载图标
-icon = QIcon(get_resource_path('icons/camera.svg'))
-
-# 加载图片
-pixmap = QPixmap(get_resource_path('images/logo.png'))
-
-# 加载样式表
-with open(get_resource_path('styles/main.qss'), 'r', encoding='utf-8') as f:
-    stylesheet = f.read()
-    app.setStyleSheet(stylesheet)
-```
-
-## 资源管理建议
-
-1. 使用 SVG 格式的矢量图标以支持高DPI显示
-2. 图标尺寸建议使用 16x16, 24x24, 32x32, 48x48 等标准尺寸
-3. 样式表使用相对单位 (em, %) 以适应不同分辨率
-4. 图片文件压缩以减小应用程序体积
-5. 使用一致的命名约定便于管理
-
-## 版权信息
-
-请确保所有资源文件符合相应的版权要求，建议使用开源或自制资源。
-
-## 模块说明：保存图片模块 (SaveImageModule)
-
-保存图片模块用于接收上游图像并按配置或动态输入路径写入磁盘。支持按帧序号自动命名、图像格式选择、缩放、间隔/变更触发及仅运行一次模式。
-
-### 输入端口
-- `image` (frame, required): 上游提供的 `numpy.ndarray` 图像 (BGR 格式)。
-- `path` (meta, optional): 动态保存路径。当为目录时覆盖 `output_dir`；当包含文件扩展名 (`.png/.jpg/.jpeg`) 时视为完整文件名直接保存。
-
-### 输出端口
-- `path`: 实际保存的文件路径。
-- `index`: 保存序号（从0开始）。
-- `timestamp`: 保存时间戳 (Unix 秒)。
-- `status`: 状态字符串：`saved` / `exists` / `no-image` / `skipped` / `mkdir-fail:...` / `write-fail` / `error:...`。
-
-### 主要配置字段
-| 字段 | 说明 |
+## 2. 主要特性速览
+| 类别 | 特性 |
 |------|------|
-| `output_dir` | 默认输出目录（动态 `path` 为目录时被覆盖）。 |
-| `filename_pattern` | 文件名格式，支持 `{index:05d}`。仅在未提供完整文件名时使用。 |
-| `create_dir` | 目录不存在是否自动创建。 |
-| `overwrite` | 已存在文件是否覆盖。 |
-| `image_format` | 保存格式 `PNG` 或 `JPG`。 |
-| `quality` | JPG 质量 (1-100)。 |
-| `update_mode` | 触发模式：`every` 每次都保存；`on_change` 图像对象变更时保存；`interval` 间隔(ms)；`once` 仅首次保存一次。 |
-| `interval_ms` | 与 `interval` 搭配的最小间隔毫秒。 |
-| `downscale_max` | 大于0时若宽或高超过该值，按比例缩小。 |
+| 可视化 | 拖拽模块、端口连线、分组框、网格背景、缩放与右键平移 |
+| 模型推理 | YOLOv8 检测 / 分类 / 分割（本地权重加载） |
+| 工业协议 | Modbus TCP / RTU / 多主机 / 模拟服务器 / 熔断 / 边沿监听 / 安全写入 |
+| 显示 | 图片缩略图、文本滚动、OK/NOK 状态块、自适应高度 |
+| 数据输出 | 路径选择器、保存图片（动态路径/模式）、打印显示 |
+| 调度执行 | 顺序 / 自适应并行（阻塞感知） |
+| 监控 | 每模块执行次数/平均耗时/最大耗时/最后耗时；CPU/GPU(多卡)/磁盘使用进度条；可手动重置 |
+| 交互 | 运行一次 / 连续运行 / 暂停 / 恢复 / 停止 / 快捷键 |
+| 持久化 | 项目结构 JSON 保存/加载；模块尺寸与分组重建 |
+| 健壮性 | 模块熔断、定时刷新、端口兼容高亮、尺寸拖拽、阴影/圆角美化 |
 
-### once 模式说明
-将 `update_mode` 设置为 `once` 后，模块只会保存第一次收到的有效图像，后续全部返回 `skipped`。适用于仅需快照的场景。
+## 3. 快速开始
+### 环境要求
+- Python >= 3.10  
+- Windows / Linux (建议 64 位)  
+- GPU (可选，用于 YOLOv8 加速)  
 
-### 动态路径用法示例
+### 安装依赖
+在项目根目录：
+```powershell
+conda activate nanjin
+pip install -r requirements.txt
+```
 
-1. 动态目录：上游模块输出 `/custom/session_001` 连接到 `path` 输入，则保存目录改为该值，文件名仍使用 `filename_pattern`。
-2. 完整路径：上游输出 `C:/data/snap.png` 连接到 `path` 输入，则直接写入该文件（忽略 `filename_pattern`）。
+### 启动
+```powershell
+python main.py
+```
 
-### 示例
+### 基本步骤
+1. 右键画布 → 选择模块（例如 `yolov8检测`、`modbus连接`、`打印显示`）。  
+2. 拖动输出端口到目标输入端口完成连线。  
+3. 选中模块 → 在侧栏/属性面板（若有）或源码配置处调整参数。  
+4. F5 连续运行 / F9 运行一次。  
+5. 查看底部状态栏性能与系统资源。  
+6. 完成后使用保存功能记录工程结构。  
+
+## 4. 核心概念
+| 概念 | 说明 |
+|------|------|
+| 模块 (Module) | 独立功能单元，具有输入端口与输出端口。 |
+| 端口 (Port) | 声明数据流类型与方向，支持 required 标记与类型兼容高亮。 |
+| 连接 (Connection) | 输出端口 → 输入端口的数据通路。 |
+| 分组 (Group) | 包含多个模块的可移动框，持久化位置与成员。 |
+| 执行器 (PipelineExecutor) | 按拓扑顺序调度模块，记录性能指标。 |
+| 自适应并行 | 在同层级对标记为可能阻塞 (may_block) 的模块进行线程池并发。 |
+| 持久化结构 | 包含 modules / connections / groups JSON。 |
+
+## 5. 模块分类与功能一览
+| 分类 | 示例模块 | 说明 |
+|------|----------|------|
+| 输入 | 路径选择器 | 输出文件/目录路径供下游使用 |
+| 模型 | yolov8检测 / yolov8分类 / yolov8分割 | 目标检测 / 图像分类 / 实例分割 |
+| 显示 | 图片展示 / 打印显示 / OK/NOK展示 | 图像缩略 + 文本滚动 + 结果状态块 |
+| IO/协议 | modbus连接 / modbus监听 / modbus输出 / modbus模拟服务器 | 工业寄存器交互与测试环境 |
+| 存储 | 保存图片模块 | 条件/间隔/一次性图像落盘 |
+| 其它 | 自定义/插件模块 | 支持后续扩展加载 |
+| 脚本 | 脚本模块 | 内联 Python 代码执行与快速转换 |
+
+## 6. YOLOv8 系列模块
+均支持：模型路径配置、置信度阈值、设备选择 (cpu/gpu)、推理尺寸、自适应非极大值抑制策略。输出典型包含 `image`（绘制结果）、`boxes`/`classes`/`masks` 等。权重示例文件：`yolov8n.pt`、`yolov8n-cls.pt`、`yolov8n-seg.pt` 已放置于根目录便于快速测试。
+
+## 7. 图像/文本/OK/NOK 展示模块
+| 模块 | 说明 |
+|------|------|
+| 图片展示 | 自动缩放/保持比例，双击可在预设尺寸间切换。 |
+| 打印显示 | 多行缓冲/时间戳/字典合并/截断/自适应高度。 |
+| OK/NOK展示 | 根据 `flag`（True/False/None）动态背景颜色与自定义字体大小。 |
+
+## 8. 保存图片模块
+支持 once / interval / on_change / every 四模式；动态路径输入 (`path`) 可覆盖目录或指定完整文件；自动缩放与 JPG 质量控制。主要状态值：`saved` / `exists` / `skipped` / `no-image` / `write-fail` / `error:...`。
+
+示例：
 ```python
-# 假设 executor 已经构建
-save_mod = executor.get_module_by_id('保存图片模块')
 save_mod.configure({
-    'output_dir': 'outputs/images',
-    'filename_pattern': 'frame_{index:05d}.png',
-    'image_format': 'PNG',
-    'update_mode': 'interval',
-    'interval_ms': 500,
-    'downscale_max': 1280,
+  'output_dir': 'outputs/images',
+  'filename_pattern': 'frame_{index:05d}.png',
+  'update_mode': 'interval',
+  'interval_ms': 300,
+  'downscale_max': 1280,
 })
 ```
 
-### 常见状态
-- `saved`: 保存成功
-- `exists`: 文件已存在且未覆盖
-- `skipped`: 未满足触发条件（如 interval 未到、once 已执行）
-- `no-image`: 输入为空或类型不符
-- `write-fail`: OpenCV 返回失败
-- `mkdir-fail:...` / `error:...`: 文件系统或写入异常
+## 9. 打印显示模块
+配置字段：`max_lines` / `truncate` / `prefix` / `update_mode` / `interval_ms` / `merge_dict` / `show_timestamp`。空内容显示 `(无内容)`。
 
-## 模块说明：打印显示模块 (PrintDisplayModule)
+## 10. 路径选择器模块
+双击弹出系统文件或目录选择对话框；输出端口 `path` 可与保存图片模块联动形成动态保存路径。
 
-打印显示模块用于在画布内实时展示上游任意数据的格式化文本。支持行缓冲、时间戳、字典合并与截断。
+## 11. Modbus 全套模块
+| 模块 | 关键能力 |
+|------|----------|
+| modbus连接 | TCP/RTU 选择；多主机轮询；熔断 (fuse) 冷却；状态/连接列表输出。 |
+| modbus监听 | 边沿模式：rising / falling / any / level；值反转；寄存器/线圈读取。 |
+| modbus输出 | 条件写入 (`write_on_change`)；安全模式 `safe_mode` 遇异常跳过写入。 |
+| modbus模拟服务器 | 本地 127.0.0.1 测试环境，周期性上下文快照。 |
 
-### 输入端口
-- `data` (meta): 任意可序列化/可打印对象。
+熔断策略：连续失败达到阈值 → 标记 fused → 冷却期内暂停重试 → 到期后自动尝试恢复。监听模块通过比较前后值实现边沿触发。
 
-### 输出端口
-- `text`: 最新行文本
-- `changes`: 更新次数
-
-### 主要配置字段
+## 12. 自适应并行执行与性能指标
+执行器将同层级可能阻塞模块（声明 `may_block`）提交到线程池，其余保持顺序，提升吞吐同时保持可控性。性能指标实时更新：
 | 字段 | 说明 |
 |------|------|
-| `max_lines` | 保留的行数上限。 |
-| `truncate` | 单行最大长度，超出截断追加 `...`。 |
-| `prefix` | 每行前缀字符串。 |
-| `update_mode` | `every` / `on_change` / `interval` 三种。 |
-| `interval_ms` | 间隔模式的最小毫秒。 |
-| `merge_dict` | dict 自动拼接为 `k=v` 形式。 |
-| `show_timestamp` | 前缀显示 `[HH:MM:SS]` 时间戳。 |
+| exec_count | 执行次数 |
+| total_time | 累计毫秒 |
+| max_time | 单次最大耗时 |
+| last_time | 最近一次耗时 |
+| avg_time | 平均耗时 |
 
-### 示例
+底部状态栏显示：最慢模块标识、多 GPU 使用率、CPU / 磁盘占用。可通过菜单重置指标或暂停系统信息轮询。
+
+## 13. 画布与操作
+| 操作 | 说明 |
+|------|------|
+| 拖拽端口 | 输出 → 输入建立连接，空白释放取消。 |
+| 右键按住移动 | 平移视图，不触发菜单。 |
+| Ctrl+滚轮 | 缩放，以鼠标为锚点。 |
+| 分组 | 多选模块 → 右键 → 创建分组；分组拖动联动成员。 |
+| 复制/粘贴 | 右键或快捷菜单；支持偏移复制。 |
+| 撤销/重做 | 结构快照历史。 |
+| 调整大小 | 右下角拖拽；尺寸持久化随保存记录。 |
+
+快捷键：F5 运行连续 / F9 单次运行 / F6 暂停 / F7 恢复 / F8 停止 / Ctrl+S 保存。
+
+## 14. 状态与系统资源监控
+定时器刷新（可关闭）：CPU 百分比、多 GPU 列表与使用率（pynvml / torch 回退）、磁盘使用进度条。为性能调优与卡顿排查提供参考。
+
+## 15. 数据/工程持久化
+保存内容：模块 ID / 类型 / 坐标 / 尺寸 / 端口定义 / 配置 / 自定义状态 / 连接关系 / 分组信息。加载时重建布局与分组，避免位置漂移（分组使用 scenePos）。
+
+## 16. 常见问题排查
+| 问题 | 解决方式 |
+|------|----------|
+| 图像不显示 | 确认上游输出 `image` 数组，检查形状与 dtype；查看调试输出。 |
+| 缩放光标无效 | 是否处于选择状态或光标位于右下角拖拽区域；确保未覆盖 `hoverMoveEvent`。 |
+| Modbus 连接失败反复重试 | 查看是否进入 fused 状态；等待冷却或降低失败阈值。 |
+| GPU 未显示 | 安装 `pynvml` 并确保 NVIDIA 驱动；否则回退为 CPU。 |
+| YOLO 推理慢 | 调低 `img_size` 或启用 GPU；减少不必要的显示模块。 |
+| 保存图片未触发 | 检查 `update_mode` 与 `interval_ms`；`once` 模式只保存首帧。 |
+
+## 17. 未来规划
+已实现（基础版）：连接线动画与状态颜色、模块状态徽章、脚本模块初版。  
+待增强：
+- 性能快照导出（CSV/JSON）  
+- 自定义脚本模块高级编辑器（语法高亮/即时运行/沙盒限制）  
+- 远程设备监控与多协议扩展 (OPC UA, MQTT)  
+- 流程模板库与一键导入  
+
+## 18. 资源目录说明
+```
+resources/
+├─ icons/      # 矢量/位图图标
+├─ styles/     # QSS 样式表与主题
+├─ images/     # 演示或背景图片
+├─ fonts/      # 自定义字体
+├─ themes/     # 颜色/主题配置 JSON/YAML
+└─ README.md   # 当前文档
+```
+示例加载：
 ```python
-print_mod = executor.get_module_by_id('打印显示')
-print_mod.configure({'max_lines': 15, 'update_mode': 'on_change'})
+from PyQt6.QtGui import QIcon, QPixmap
+import os
+
+def res(*parts):
+    return os.path.join(os.path.dirname(__file__), *parts)
+
+icon = QIcon(res('icons', 'camera.svg'))
+logo = QPixmap(res('images', 'logo.png'))
+with open(res('styles', 'main.qss'), 'r', encoding='utf-8') as f:
+    app.setStyleSheet(f.read())
 ```
 
-### 画布显示
-模块自动扩展高度以适应多行文本，空内容显示为 `(无内容)`。
+资源建议：使用 SVG；控制尺寸集 (16/24/32/48)；图片压缩；命名统一；避免未授权素材。
 
-## 模块说明：路径选择器 (PathSelectorModule)
+## 19. 许可与版权
+请阅读项目根目录 `LICENSE`。所有外部模型与第三方库请遵循其各自许可。示例 YOLO 权重来自 Ultralytics 官方公开发布。请勿将本平台用于未授权数据采集或侵犯隐私的场景。
 
-用于在流程中提供可配置的路径输出，双击模块弹出系统选择对话框。
+---
+如需扩展新模块：在 `app/pipeline/module_registry.py` 注册；实现输入/输出端口与 `process()`；必要时声明 `ModuleCapabilities(may_block=True)` 以启用自适应并行。
 
-### 输出端口
-- `path`: 当前选择的目录或文件路径。
-
-### 配置字段
-| 字段 | 说明 |
-|------|------|
-| `selection_mode` | `directory` 或 `file`，控制弹窗类型。 |
-| `dialog_title` | 对话框标题。 |
-| `default_path` | 初始目录或文件路径。 |
-| `remember_last` | 选中后是否写回 `default_path` 以便下次起始位置。 |
-
-### 使用
-1. 在右键菜单添加“路径选择器”模块。
-2. 双击模块 → 选择目录或文件 → 输出端口 `path` 即可被其它模块消费（例如保存图片的动态路径输入）。
-
-## 快捷键汇总
-- F5 运行连续流程
-- F6 暂停
-- F7 恢复
-- F8 停止
-- F9 运行一次（单轮执行，不启动后台线程）
-- Ctrl+S 保存（首次需使用另存为后建立当前路径）
+欢迎通过 Issue / PR 提交改进建议。祝使用愉快！

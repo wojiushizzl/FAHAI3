@@ -158,6 +158,11 @@ try:
     register_module("OK/NOK展示", OkNokDisplayModule)
 except Exception as e:
     pass
+try:
+    from .custom.script_module import ScriptModule
+    register_module("脚本模块", ScriptModule)
+except Exception:
+    pass
 
 # YOLOv8 模型系列模块 (检测/分类/分割)
 try:
