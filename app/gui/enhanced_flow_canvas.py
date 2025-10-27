@@ -36,8 +36,8 @@ class ModuleItem(QGraphicsRectItem):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)  # 用于尺寸调整与光标反馈
         self.text_item = QGraphicsTextItem(module_type, self)
-        self.text_item.setFont(QFont("Arial", 10))
-        self.text_item.setPos(10, 8)
+        self.text_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        self.text_item.setPos(0, 4)  # will center after ports created
         if input_ports is None:
             input_ports = list(module_ref.input_ports.keys()) if module_ref else ["in"]
         if output_ports is None:
@@ -104,6 +104,22 @@ class ModuleItem(QGraphicsRectItem):
         if self._is_image_viewer:
             self._update_thumbnail(None)
 
+    def _center_title(self):
+        """精确居中标题：考虑左右内边距与当前笔宽，避免因字体渲染导致的半像素偏移。"""
+        try:
+            if not hasattr(self, 'text_item') or self.text_item is None:
+                return
+            br = self.text_item.boundingRect()
+            pad_left = 4
+            pad_right = 4
+            avail_w = self.rect().width() - pad_left - pad_right
+            cx = pad_left + (avail_w - br.width()) / 2
+            # 四舍五入避免模糊
+            cx = int(round(cx))
+            self.text_item.setPos(cx, 4)
+        except Exception:
+            pass
+
     def _create_points(self):
         """创建端口并为后续展示内容预留下方区域。
         布局策略：
@@ -130,16 +146,18 @@ class ModuleItem(QGraphicsRectItem):
         # 构建输出端口
         for idx, name in enumerate(self.output_ports_def):
             y = ports_start_y + idx * row_h
-            point = ConnectionPoint(self, "output", self.rect().width() - 4, y - 5, name, canvas=self.canvas)
+            point_x = self.rect().width() - 4
+            point = ConnectionPoint(self, "output", point_x, y - 5, name, canvas=self.canvas)
             self.output_points.append(point)
             label = QGraphicsTextItem(name, self)
             label.setFont(QFont("Arial", 8))
             label.setDefaultTextColor(QColor(50, 50, 50))
-            # 输出标签置于中间偏右，避免与输入标签重叠
-            label.setPos(self.rect().width()/2 - 10, y - 8)
+            # 输出标签右对齐到端口左侧  (文本右边缘靠近 point_x - 6)
+            br = label.boundingRect()
+            label.setPos(point_x - br.width() - 6, y - 8)
             self.output_labels.append(label)
         # 计算内容区起始 y
-        self._content_offset = title_h + max_rows * row_h + 6  # 端口区下额外留白
+        self._content_offset = title_h + max_rows * row_h + 12  # 增加端口区与内容区间隔
         # 若当前矩形高度不足以展示最小内容区则扩展
         min_content_h = 60 if (self._is_image_viewer or self._is_text_viewer) else 0
         needed_h = self._content_offset + min_content_h + 8
@@ -174,6 +192,8 @@ class ModuleItem(QGraphicsRectItem):
             self.input_ports_def = list(self.module_ref.input_ports.keys())
             self.output_ports_def = list(self.module_ref.output_ports.keys())
         self._create_points()
+        if hasattr(self, '_center_title'):
+            self._center_title()
 
     # ----- 缩略图与大小调整支持 -----
     def refresh_visual(self):
@@ -380,6 +400,8 @@ class ModuleItem(QGraphicsRectItem):
             self.setRect(0, 0, new_w, new_h)
             self._relayout_ports()
             self.refresh_visual()
+            if hasattr(self, '_center_title'):
+                self._center_title()
             if self._corner_handle:
                 self._corner_handle.setRect(new_w - self._corner_handle_size, new_h - self._corner_handle_size,
                                             self._corner_handle_size, self._corner_handle_size)
@@ -395,6 +417,8 @@ class ModuleItem(QGraphicsRectItem):
                 if 'width' in self.module_ref.config or 'height' in self.module_ref.config:
                     self.module_ref.configure({'width': new_w, 'height': new_h})
             self.refresh_visual()
+            if hasattr(self, '_center_title'):
+                self._center_title()
             print(f"[DEBUG][{self.module_id}] 尺寸调整完成 ({new_w},{new_h})")
             event.accept(); return
         super().mouseReleaseEvent(event)
@@ -404,7 +428,7 @@ class ModuleItem(QGraphicsRectItem):
         title_h = 20
         row_h = 18
         max_rows = max(len(self.input_points), len(self.output_points))
-        self._content_offset = title_h + max_rows * row_h + 6
+        self._content_offset = title_h + max_rows * row_h + 12
         # 输入端口位置更新
         for idx, point in enumerate(self.input_points):
             y = title_h + idx * row_h
@@ -417,13 +441,16 @@ class ModuleItem(QGraphicsRectItem):
             y = title_h + idx * row_h
             point.setPos(self.rect().width() - 4, y - 5)
             if idx < len(self.output_labels):
-                self.output_labels[idx].setPos(self.rect().width()/2 - 10, y - 8)
+                br = self.output_labels[idx].boundingRect()
+                self.output_labels[idx].setPos(self.rect().width() - 4 - br.width() - 6, y - 8)
             point.update_connections()
         # 内容项位置
         if self._thumb_item:
             self._thumb_item.setPos(8, self._content_offset)
         if getattr(self, '_text_item', None):
             self._text_item.setPos(8, self._content_offset)
+        if hasattr(self, '_center_title'):
+            self._center_title()
         if self._corner_handle:
             self._corner_handle.setRect(
                 self.rect().width() - self._corner_handle_size,
@@ -452,25 +479,66 @@ class ModuleItem(QGraphicsRectItem):
         return super().itemChange(change, value)
 
     def paint(self, painter: QPainter, option, widget=None):
-        """自定义模块外观：圆角、渐变、选中高亮、阴影与标题栏分隔。"""
+        """高级美化：圆角、双层阴影、类型颜色、暗色主题适配、选中辉光、错误徽章。"""
         rect = self.rect()
         painter.save()
-        # 背景渐变
-        base_color = QColor(200,220,255) if not self.isSelected() else QColor(180,210,250)
-        grad = QColor(base_color)
-        # 轻微阴影
-        shadow_rect = QRectF(rect.x()+2, rect.y()+2, rect.width(), rect.height())
+        dark = False
+        if hasattr(self, 'canvas') and hasattr(self.canvas, '_dark_theme'):
+            dark = bool(getattr(self.canvas, '_dark_theme'))
+        # 类型颜色映射
+        type_colors = {
+            '相机': (QColor(70,130,180), QColor(90,150,200)),
+            '触发': (QColor(255,140,0), QColor(255,170,40)),
+            '模型': (QColor(100,70,150), QColor(130,90,180)),
+            '后处理': (QColor(200,60,60), QColor(220,90,90)),
+            '逻辑': (QColor(60,120,60), QColor(80,150,80)),
+            '打印显示': (QColor(50,90,140), QColor(70,110,160)),
+            '图片展示': (QColor(40,100,140), QColor(60,130,170)),
+            'OK/NOK展示': (QColor(90,90,90), QColor(120,120,120)),
+        }
+        base_pair = type_colors.get(self.module_type, (QColor(95,125,170), QColor(120,155,195)))
+        c1, c2 = base_pair
+        if dark:
+            # 暗色下整体降低亮度并稍微提高饱和度
+            def dim(col: QColor, f=0.55):
+                return QColor(int(col.red()*f), int(col.green()*f), int(col.blue()*f))
+            c1 = dim(c1, 0.45); c2 = dim(c2, 0.60)
+        # 选中态加亮
+        if self.isSelected():
+            def brighten(col: QColor, d=30):
+                return QColor(min(255,col.red()+d), min(255,col.green()+d), min(255,col.blue()+d))
+            c1 = brighten(c1, 25); c2 = brighten(c2, 45)
+        # 渐变背景
+        from PyQt6.QtGui import QLinearGradient
+        grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        grad.setColorAt(0, c1)
+        grad.setColorAt(1, c2)
+        # 阴影层（外层 + 内层轻描）
+        shadow_color = QColor(0,0,0,90 if not dark else 140)
+        shadow_rect_outer = QRectF(rect.x()+2, rect.y()+3, rect.width(), rect.height())
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0,0,0,40))
-        painter.drawRoundedRect(shadow_rect, 6, 6)
+        painter.setBrush(shadow_color)
+        painter.drawRoundedRect(shadow_rect_outer, 7, 7)
+        inner_shadow = QColor(0,0,0,55 if not dark else 80)
+        shadow_rect_inner = QRectF(rect.x()+1, rect.y()+1, rect.width(), rect.height())
+        painter.setBrush(inner_shadow)
+        painter.drawRoundedRect(shadow_rect_inner, 7, 7)
         # 主面板
-        painter.setBrush(QBrush(base_color))
-        border_color = QColor(100,150,200) if not self.isSelected() else QColor(50,110,180)
-        pen = QPen(border_color, 2 if not self.isSelected() else 3)
+        painter.setBrush(QBrush(grad))
+        border_base = c1.darker(140) if not dark else c1.darker(180)
+        if self.isSelected():
+            border_base = border_base.lighter(130)
+        pen = QPen(border_base, 2 if not self.isSelected() else 3)
         painter.setPen(pen)
-        painter.drawRoundedRect(rect, 6, 6)
+        painter.drawRoundedRect(rect, 7, 7)
+        # 选中辉光（外圈柔和）
+        if self.isSelected():
+            glow = QPen(QColor(255,255,255,70 if not dark else 110), 4)
+            painter.setPen(glow)
+            painter.drawRoundedRect(rect.adjusted(-2,-2,2,2), 9, 9)
         # 标题栏分隔线
-        painter.setPen(QPen(QColor(120,150,190), 1))
+        line_col = QColor(255,255,255,90) if dark else QColor(245,245,245,160)
+        painter.setPen(QPen(line_col, 1))
         from PyQt6.QtCore import QPointF as _QPF
         painter.drawLine(_QPF(rect.left()+4, rect.top()+20), _QPF(rect.right()-4, rect.top()+20))
         # 状态徽章绘制（错误/警告/缓存）
@@ -480,15 +548,15 @@ class ModuleItem(QGraphicsRectItem):
             # 简单规则：存在 last_error -> 错误；有警告列表 -> 警告；输出未变化超过 N 次 -> 缓存
             try:
                 if getattr(self.module_ref, 'last_error', None):
-                    status_color = QColor(220,40,40); label_text = 'E'
+                    status_color = QColor(235,60,60); label_text = 'E'
                 elif getattr(self.module_ref, 'warnings', None):
                     wlist = getattr(self.module_ref, 'warnings')
                     if isinstance(wlist, (list, tuple)) and len(wlist) > 0:
-                        status_color = QColor(255,170,0); label_text = 'W'
+                        status_color = QColor(255,190,40); label_text = 'W'
                 # 缓存标记（输出哈希重复次数）
                 rep = getattr(self.module_ref, '_repeat_outputs_count', 0)
                 if status_color is None and rep >= 5:
-                    status_color = QColor(140,140,140); label_text = 'C'
+                    status_color = QColor(150,150,150); label_text = 'C'
             except Exception:
                 pass
         if status_color:
@@ -574,6 +642,8 @@ class EnhancedFlowCanvas(QGraphicsView):
         self.show_grid = True
         self.grid_small = 20
         self.grid_big = 100
+        # 暗色主题标记（由 MainWindow 调用 set_dark_theme 来设置）
+        self._dark_theme = False
         # 右键平移参数
         self._pan_active = False
         self._pan_last_pos = None  # type: ignore
@@ -640,7 +710,10 @@ class EnhancedFlowCanvas(QGraphicsView):
         right = int(rect.right()) + self.grid_small
         bottom = int(rect.bottom()) + self.grid_small
         # 小网格线
-        pen_small = QPen(QColor(230,230,230))
+        if getattr(self, '_dark_theme', False):
+            pen_small = QPen(QColor(70,70,70,120))  # 更暗更透明
+        else:
+            pen_small = QPen(QColor(230,230,230))
         pen_small.setWidth(0)
         painter.setPen(pen_small)
         x = left
@@ -652,7 +725,10 @@ class EnhancedFlowCanvas(QGraphicsView):
             painter.drawLine(left, y, right, y)
             y += self.grid_small
         # 大网格线
-        pen_big = QPen(QColor(200,200,200))
+        if getattr(self, '_dark_theme', False):
+            pen_big = QPen(QColor(95,95,95,160))
+        else:
+            pen_big = QPen(QColor(200,200,200))
         pen_big.setWidth(0)
         painter.setPen(pen_big)
         x = left
@@ -666,6 +742,75 @@ class EnhancedFlowCanvas(QGraphicsView):
                 painter.drawLine(left, y, right, y)
             y += self.grid_small
         painter.restore()
+
+    def set_dark_theme(self, dark: bool):
+        """外部通知暗色主题状态，刷新视图背景与网格颜色"""
+        if self._dark_theme != dark:
+            self._dark_theme = dark
+            self.viewport().update()
+
+    # ---------- 视图状态持久化 ----------
+    def export_view_state(self) -> Dict[str, Any]:
+        """导出当前视图状态 (中心、缩放、网格开关、暗色主题)"""
+        # 缩放因子：通过当前变换矩阵的 m11
+        m = self.transform()
+        center_scene = self.mapToScene(self.viewport().rect().center())
+        return {
+            'scale': m.m11(),
+            'center_x': center_scene.x(),
+            'center_y': center_scene.y(),
+            # 精确滚动条位置（有时 centerOn 会因为场景尺寸改变产生偏差）
+            'h_scroll': self.horizontalScrollBar().value(),
+            'v_scroll': self.verticalScrollBar().value(),
+            'show_grid': self.show_grid,
+            'dark_theme': getattr(self, '_dark_theme', False)
+        }
+
+    def import_view_state(self, state: Dict[str, Any]):
+        """恢复视图状态"""
+        try:
+            if 'scale' in state:
+                cur = self.transform().m11()
+                target = float(state['scale'])
+                if target > 0 and abs(target - cur) > 1e-3:
+                    factor = target / cur
+                    self.scale(factor, factor)
+            if 'center_x' in state and 'center_y' in state:
+                self.centerOn(float(state['center_x']), float(state['center_y']))
+            # 优先使用滚动条定位，确保垂直位置精准
+            h_set = False; v_set = False
+            if 'h_scroll' in state:
+                try:
+                    self.horizontalScrollBar().setValue(int(state['h_scroll']))
+                    h_set = True
+                except Exception:
+                    pass
+            if 'v_scroll' in state:
+                try:
+                    self.verticalScrollBar().setValue(int(state['v_scroll']))
+                    v_set = True
+                except Exception:
+                    pass
+            # 若滚动条范围尚未准备，使用微延迟重试一次
+            if not (h_set and v_set) and ('h_scroll' in state or 'v_scroll' in state):
+                from PyQt6.QtCore import QTimer
+                target_h = state.get('h_scroll'); target_v = state.get('v_scroll')
+                def _retry_scroll_restore():
+                    try:
+                        if target_h is not None:
+                            self.horizontalScrollBar().setValue(int(target_h))
+                        if target_v is not None:
+                            self.verticalScrollBar().setValue(int(target_v))
+                    except Exception:
+                        pass
+                QTimer.singleShot(0, _retry_scroll_restore)
+            if 'show_grid' in state:
+                self.show_grid = bool(state['show_grid'])
+            if 'dark_theme' in state:
+                self.set_dark_theme(bool(state['dark_theme']))
+            self.viewport().update()
+        except Exception as e:
+            print(f"恢复视图状态失败: {e}")
 
     def _on_selection_changed(self):
         try:

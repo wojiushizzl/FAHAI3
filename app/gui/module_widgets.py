@@ -13,12 +13,19 @@ from app.pipeline.base_module import ModuleType
 
 
 class ModuleToolbox(QWidget):
-    """模块工具箱树状+搜索+拖拽+快捷键"""
+    """模块工具箱树状+搜索+拖拽+快捷键
+    自适应宽度: 去除固定宽度, 允许随父级 DockPanel / QSplitter 调整。
+    """
     module_selected = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
-        self.setFixedWidth(240)
+        # 使用尺寸策略而非固定宽度, 最小宽度避免过窄
+        from PyQt6.QtWidgets import QSizePolicy
+        sp = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        sp.setHorizontalStretch(0)
+        self.setSizePolicy(sp)
+        self.setMinimumWidth(180)
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("搜索模块 (Ctrl+F)...")
         self.search_box.textChanged.connect(self._filter_tree)
@@ -32,10 +39,11 @@ class ModuleToolbox(QWidget):
         layout = QVBoxLayout(self)
         title = QLabel("模块工具箱")
         title.setStyleSheet("""QLabel {font-weight:bold;font-size:14px;padding:6px;background:#f0f0f0;border-bottom:1px solid #ccc;}""")
+        # 让树控件获得垂直伸展空间: 使用 stretch=1
+        self.tree.setSizePolicy(sp.horizontalPolicy(), QSizePolicy.Policy.Expanding)
         layout.addWidget(title)
         layout.addWidget(self.search_box)
-        layout.addWidget(self.tree)
-        layout.addStretch()
+        layout.addWidget(self.tree, 1)
         # 快捷键
         QShortcut(QKeySequence("Ctrl+F"), self, activated=lambda: self.search_box.setFocus())
         QShortcut(QKeySequence("Return"), self, activated=self._add_selected_via_enter)
@@ -80,7 +88,10 @@ class ModuleToolbox(QWidget):
                 inode.setIcon(0, self._make_icon(mod))
                 gnode.addChild(inode)
             gnode.setExpanded(True)
+        # 自动列宽在初始渲染后可能导致过度收缩, 使用一个最小列宽保障可读性
         self.tree.resizeColumnToContents(0)
+        if self.tree.columnWidth(0) < 140:
+            self.tree.setColumnWidth(0, 140)
         self._filter_tree(self.search_box.text())
 
     def _make_icon(self, name: str) -> QIcon:

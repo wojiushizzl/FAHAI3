@@ -124,32 +124,30 @@ class PropertyPanel(QWidget):
         for fname, field in ConfigModel.__fields__.items():  # type: ignore
             value = current_cfg.get(fname, field.default)
             w = None
-            # 列表类型优先检测：pydantic 对 List[int] 的 field.type_ 会是 int，需要根据实际值/outer_type_ 判定
+            # 安全获取字段基础类型（pydantic v1 有 type_, 若不存在回退 annotation / outer_type_）
+            base_type = getattr(field, 'type_', None) or getattr(field, 'annotation', None)
             outer = getattr(field, 'outer_type_', None)
-            is_list_type = isinstance(value, (list, tuple)) or (
-                outer and getattr(outer, '__origin__', None) in (list, List)
-            )
+            origin_outer = getattr(outer, '__origin__', None)
+            is_list_type = isinstance(value, (list, tuple)) or (origin_outer in (list, List))
             if is_list_type:
-                # 用简单的逗号分隔编辑：根据内部标量类型尝试转换
-                from typing import List as TypingList  # 避免与局部 List 混淆
                 display = ",".join(str(v) for v in value) if value else ""
                 w = QLineEdit(display)
                 w.setPlaceholderText("逗号分隔列表")
-            elif field.type_ in (int,):
+            elif base_type in (int,):
                 w = QSpinBox(); w.setRange(-999999, 999999)
                 try:
                     w.setValue(int(value) if value is not None else 0)
                 except Exception:
                     w.setValue(0)
-            elif field.type_ in (float,):
+            elif base_type in (float,):
                 w = QDoubleSpinBox(); w.setDecimals(4); w.setRange(-1e9, 1e9)
                 try:
                     w.setValue(float(value) if value is not None else 0.0)
                 except Exception:
                     w.setValue(0.0)
-            elif field.type_ in (bool,):
+            elif base_type in (bool,):
                 w = QCheckBox(); w.setChecked(bool(value))
-            elif field.type_ in (str,):
+            elif base_type in (str,):
                 # 路径类型字段：名称以 path 或 _path 结尾 -> 提供文件/目录选择按钮
                 if fname.lower().endswith("path") or fname.lower().endswith("_path"):
                     container = QWidget(); hl = QHBoxLayout(); hl.setContentsMargins(0,0,0,0); container.setLayout(hl)
@@ -200,9 +198,8 @@ class PropertyPanel(QWidget):
                     orig_field = ConfigModel.__fields__[fname]
                     orig_value = current_cfg.get(fname, orig_field.default)
                     outer = getattr(orig_field, 'outer_type_', None)
-                    is_list_type = isinstance(orig_value, (list, tuple)) or (
-                        outer and getattr(outer, '__origin__', None) in (list, List)
-                    )
+                    origin_outer = getattr(outer, '__origin__', None)
+                    is_list_type = isinstance(orig_value, (list, tuple)) or (origin_outer in (list, List))
                     txt = w.text().strip()
                     if is_list_type:
                         if txt == "":
@@ -210,7 +207,7 @@ class PropertyPanel(QWidget):
                         else:
                             parts = [p.strip() for p in txt.split(',') if p.strip()]
                             # 根据内部类型尝试数字转换
-                            inner_t = getattr(orig_field, 'type_', str)
+                            inner_t = getattr(orig_field, 'type_', None) or getattr(orig_field, 'annotation', str)
                             converted = []
                             for p in parts:
                                 if inner_t in (int, float):
@@ -527,15 +524,21 @@ class PropertyPanel(QWidget):
 
 
 class DockPanel(QWidget):
-    """停靠面板，包含工具箱和属性面板"""
+    """停靠面板，包含工具箱 (左侧可调宽度)
+    自适应宽度: 去除固定宽度, 通过 QSplitter 用户拖拽调整。
+    """
     
     # 信号定义
     module_selected = pyqtSignal(str)  # 模块选择信号
     
     def __init__(self):
         super().__init__()
-        
-        self.setFixedWidth(300)
+        # 不使用固定宽度, 设置一个合理的最小宽度并允许在 splitter 中调整
+        self.setMinimumWidth(220)
+        from PyQt6.QtWidgets import QSizePolicy
+        sp = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        sp.setHorizontalStretch(0)
+        self.setSizePolicy(sp)
         self._init_ui()
         
     def _init_ui(self):
@@ -551,6 +554,10 @@ class DockPanel(QWidget):
         # 仅保留模块工具箱（属性面板移至右侧主布局）
         self.module_toolbox = ModuleToolbox()
         tab_widget.addTab(self.module_toolbox, "模块")
+        # 调整 tab_widget 尺寸策略, 使其在面板中填充并响应宽度变化
+        from PyQt6.QtWidgets import QSizePolicy
+        tw_sp = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        tab_widget.setSizePolicy(tw_sp)
         # 连接信号
         self.module_toolbox.module_selected.connect(self.module_selected)
 
