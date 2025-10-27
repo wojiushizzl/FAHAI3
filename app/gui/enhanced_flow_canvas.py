@@ -751,17 +751,16 @@ class EnhancedFlowCanvas(QGraphicsView):
 
     # ---------- 视图状态持久化 ----------
     def export_view_state(self) -> Dict[str, Any]:
-        """导出当前视图状态 (中心、缩放、网格开关、暗色主题)"""
-        # 缩放因子：通过当前变换矩阵的 m11
+        """导出当前视图状态 (缩放、中心点、场景矩形、网格、主题)。
+        使用中心点而非滚动条，避免 DPI 与滚动范围变化导致偏移。"""
         m = self.transform()
+        sr = self.scene.sceneRect()
         center_scene = self.mapToScene(self.viewport().rect().center())
         return {
             'scale': m.m11(),
             'center_x': center_scene.x(),
             'center_y': center_scene.y(),
-            # 精确滚动条位置（有时 centerOn 会因为场景尺寸改变产生偏差）
-            'h_scroll': self.horizontalScrollBar().value(),
-            'v_scroll': self.verticalScrollBar().value(),
+            'scene_rect': (sr.x(), sr.y(), sr.width(), sr.height()),
             'show_grid': self.show_grid,
             'dark_theme': getattr(self, '_dark_theme', False)
         }
@@ -769,6 +768,13 @@ class EnhancedFlowCanvas(QGraphicsView):
     def import_view_state(self, state: Dict[str, Any]):
         """恢复视图状态"""
         try:
+            # 先恢复场景矩形，确保滚动范围正确
+            if 'scene_rect' in state and isinstance(state['scene_rect'], (list, tuple)) and len(state['scene_rect']) == 4:
+                x,y,w,h = state['scene_rect']
+                try:
+                    self.scene.setSceneRect(x,y,w,h)
+                except Exception:
+                    pass
             if 'scale' in state:
                 cur = self.transform().m11()
                 target = float(state['scale'])
@@ -776,34 +782,16 @@ class EnhancedFlowCanvas(QGraphicsView):
                     factor = target / cur
                     self.scale(factor, factor)
             if 'center_x' in state and 'center_y' in state:
-                self.centerOn(float(state['center_x']), float(state['center_y']))
-            # 优先使用滚动条定位，确保垂直位置精准
-            h_set = False; v_set = False
-            if 'h_scroll' in state:
-                try:
-                    self.horizontalScrollBar().setValue(int(state['h_scroll']))
-                    h_set = True
-                except Exception:
-                    pass
-            if 'v_scroll' in state:
-                try:
-                    self.verticalScrollBar().setValue(int(state['v_scroll']))
-                    v_set = True
-                except Exception:
-                    pass
-            # 若滚动条范围尚未准备，使用微延迟重试一次
-            if not (h_set and v_set) and ('h_scroll' in state or 'v_scroll' in state):
+                cx = float(state['center_x']); cy = float(state['center_y'])
+                self.centerOn(cx, cy)
+                # 二次延迟校正：模块增量加载或字体渲染完成后可能改变 boundingRect
                 from PyQt6.QtCore import QTimer
-                target_h = state.get('h_scroll'); target_v = state.get('v_scroll')
-                def _retry_scroll_restore():
+                def _second_pass():
                     try:
-                        if target_h is not None:
-                            self.horizontalScrollBar().setValue(int(target_h))
-                        if target_v is not None:
-                            self.verticalScrollBar().setValue(int(target_v))
+                        self.centerOn(cx, cy)
                     except Exception:
                         pass
-                QTimer.singleShot(0, _retry_scroll_restore)
+                QTimer.singleShot(200, _second_pass)
             if 'show_grid' in state:
                 self.show_grid = bool(state['show_grid'])
             if 'dark_theme' in state:

@@ -244,23 +244,30 @@ class MainWindow(QMainWindow):
         self._restore_view_state_if_exists()
 
     def _restore_view_state_if_exists(self):
-        """从 last_view.json 恢复画布视图 (缩放/中心/网格/主题)"""
+        """延迟恢复画布视图，避免自动加载流程前场景尺寸不稳定导致偏移"""
         if not hasattr(self, 'flow_canvas'):
             return
         path = getattr(self, '_view_state_path', None)
         if not path or not os.path.isfile(path):
             return
+        from PyQt6.QtCore import QTimer
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 state = json.load(f)
-            if hasattr(self.flow_canvas, 'import_view_state'):
-                self.flow_canvas.import_view_state(state)
-            # 同步主题
-            dark_flag = state.get('dark_theme')
-            if isinstance(dark_flag, bool) and dark_flag != self._theme_inverted:
-                self._toggle_invert_theme(dark_flag)
         except Exception as e:
-            print(f"恢复视图状态失败: {e}")
+            print(f"读取视图状态失败: {e}")
+            return
+        delay = 650 if getattr(self, '_auto_load_scheduled', False) else 250
+        def _do_restore():
+            try:
+                if hasattr(self.flow_canvas, 'import_view_state'):
+                    self.flow_canvas.import_view_state(state)
+                dark_flag = state.get('dark_theme')
+                if isinstance(dark_flag, bool) and dark_flag != self._theme_inverted:
+                    self._toggle_invert_theme(dark_flag)
+            except Exception as ie:
+                print(f"视图状态导入异常: {ie}")
+        QTimer.singleShot(delay, _do_restore)
 
     # ---------- 主题样式支持 ----------
     def _apply_stylesheet(self, invert: bool):
@@ -298,7 +305,12 @@ class MainWindow(QMainWindow):
         ok = self.flow_canvas.load_from_file(path)
         if ok:
             self.statusbar.showMessage(f'加载成功: {path}')
-            self._current_pipeline_path = path
+            # sample.json 视为模板，不做当前保存路径
+            if os.path.basename(path).lower() == 'sample.json':
+                self._current_pipeline_path = None
+                self.statusbar.showMessage('加载模板 sample.json，保存将提示新文件名')
+            else:
+                self._current_pipeline_path = path
             self._persist_last_project(path)
         else:
             self.statusbar.showMessage('加载失败')
@@ -311,7 +323,7 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage('保存过于频繁，已忽略')
             return
         self._last_save_ts = now
-        if not self._current_pipeline_path:
+        if (not self._current_pipeline_path) or (os.path.basename(self._current_pipeline_path).lower() == 'sample.json'):
             self._save_project_as()
             return
         ok = self.flow_canvas.save_to_file(self._current_pipeline_path)
@@ -322,7 +334,14 @@ class MainWindow(QMainWindow):
             self.statusbar.showMessage('保存失败')
         
     def _save_project_as(self):
-        path, _ = QFileDialog.getSaveFileName(self, '另存为流程', self._current_pipeline_path or '', 'Pipeline (*.json);;All (*)')
+        # 为首次保存提供一个默认建议文件名而不是 sample.json
+        import time as _time
+        if self._current_pipeline_path:
+            suggested = self._current_pipeline_path
+        else:
+            ts = _time.strftime('%Y%m%d_%H%M%S')
+            suggested = os.path.join(os.getcwd(), f'pipeline_{ts}.json')
+        path, _ = QFileDialog.getSaveFileName(self, '另存为流程', suggested, 'Pipeline (*.json);;All (*)')
         if not path:
             return
         ok = self.flow_canvas.save_to_file(path)
