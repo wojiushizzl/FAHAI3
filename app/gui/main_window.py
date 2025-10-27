@@ -35,6 +35,7 @@ class MainWindow(QMainWindow):
         self.pipeline_executor: PipelineExecutor | None = None
         self._feeder_thread: threading.Thread | None = None
         self._feeder_stop = threading.Event()
+        self._feeder_interval_sec: float = 0.5  # F5 运行循环投递间隔(秒)，可配置
         self._current_pipeline_path: str | None = None  # 当前项目文件路径（用于 Ctrl+S 直接保存）
         self._last_save_ts: float = 0.0  # 保存节流时间戳
         self._save_min_interval_ms: int = 500  # 最小间隔
@@ -44,6 +45,8 @@ class MainWindow(QMainWindow):
             os.makedirs(self._user_data_dir, exist_ok=True)
         except Exception:
             pass
+        # 通用用户设置文件路径（扩展后可加入其它偏好）
+        self._settings_path = os.path.join(self._user_data_dir, 'settings.json')
         # 定义持久化文件路径
         self._last_project_meta_path = os.path.join(self._user_data_dir, "last_project.json")
         self._view_state_path = os.path.join(self._user_data_dir, 'last_view.json')
@@ -100,7 +103,12 @@ class MainWindow(QMainWindow):
         self._last_metrics_snapshot = {}
         # 启动定时器（可通过菜单关闭）
         self._sysinfo_timer.start(); self._metrics_timer.start()
-        
+        # 预热进度条持久化状态：达到 100% 后保持绿色直到项目切换
+        self._warmup_completed_persist: bool = False
+        self._warmup_bar_last_style: str = 'inactive'
+        # 加载用户设置 (运行间隔等)
+        self._load_user_settings()
+
     def _init_ui(self):
         """初始化用户界面"""
         # 创建中央部件
@@ -198,6 +206,31 @@ class MainWindow(QMainWindow):
         reset_metrics_action = QAction('重置性能指标', self); reset_metrics_action.triggered.connect(self.reset_executor_metrics); monitor_menu.addAction(reset_metrics_action)
         toggle_sysinfo_action = QAction('系统信息轮询', self); toggle_sysinfo_action.setCheckable(True); toggle_sysinfo_action.setChecked(True); toggle_sysinfo_action.triggered.connect(self._toggle_system_info); monitor_menu.addAction(toggle_sysinfo_action)
         grid_toggle_action = QAction('切换网格显示', self); grid_toggle_action.triggered.connect(lambda: self.flow_canvas.toggle_grid()); monitor_menu.addAction(grid_toggle_action)
+        # 自动 YOLO 预热开关
+        self._auto_preheat_enabled = True
+        auto_preheat_action = QAction('自动YOLO预热', self)
+        auto_preheat_action.setCheckable(True)
+        auto_preheat_action.setChecked(True)
+        def _toggle_preheat(checked: bool):
+            self._auto_preheat_enabled = bool(checked)
+            if hasattr(self, 'statusbar'):
+                self.statusbar.showMessage('自动YOLO预热' + ('已启用' if checked else '已关闭'), 3000)
+        auto_preheat_action.toggled.connect(_toggle_preheat)
+        monitor_menu.addAction(auto_preheat_action)
+        # 设置运行循环间隔
+        set_interval_action = QAction('设置运行间隔(ms)', self)
+        def _set_interval():
+            from PyQt6.QtWidgets import QInputDialog
+            cur_ms = int(self._feeder_interval_sec * 1000)
+            val, ok = QInputDialog.getInt(self, '运行间隔', '循环投递空输入触发执行的间隔 (毫秒):', cur_ms, 50, 10000, 50)
+            if not ok:
+                return
+            self._feeder_interval_sec = max(0.05, val/1000.0)
+            self._post_status(f'已设置运行间隔: {val}ms', 3000)
+            # 持久化保存
+            self._persist_user_settings()
+        set_interval_action.triggered.connect(_set_interval)
+        monitor_menu.addAction(set_interval_action)
         # 调试: 强制刷新所有模块视觉
         refresh_view_act = QAction('刷新所有模块视觉', self)
         def _do_refresh_all():
@@ -307,6 +340,14 @@ class MainWindow(QMainWindow):
         self.sysinfo_label.setStyleSheet("QLabel { color: #555; padding-left:6px; }")
         self.metrics_label = QLabel("Exec: 0 | Avg: 0ms | Slow: -")
         self.metrics_label.setStyleSheet("QLabel { color:#444; padding-left:12px; }")
+        # YOLO 预热进度条（持久化完成）
+        self.warmup_bar = QProgressBar()
+        self.warmup_bar.setRange(0,100)
+        self.warmup_bar.setFixedWidth(100)
+        self.warmup_bar.setTextVisible(False)
+        self._apply_warmup_bar_style('inactive')
+        self.warmup_bar.setToolTip("YOLO 模型预热进度 (全部模块平均百分比) | 绿色=完成 | 紫色=进行中 | 灰色=未开始")
+        # 添加到状态栏
         self.statusbar.addPermanentWidget(self.metrics_label)
         self.statusbar.addPermanentWidget(QLabel("CPU"))
         self.statusbar.addPermanentWidget(self.cpu_bar)
@@ -314,6 +355,8 @@ class MainWindow(QMainWindow):
         self.statusbar.addPermanentWidget(self.gpu_bar)
         self.statusbar.addPermanentWidget(QLabel("Disk"))
         self.statusbar.addPermanentWidget(self.disk_bar)
+        self.statusbar.addPermanentWidget(QLabel("Warmup"))
+        self.statusbar.addPermanentWidget(self.warmup_bar)
         self.statusbar.addPermanentWidget(self.sysinfo_label)
         
     def _connect_signals(self):
@@ -380,6 +423,7 @@ class MainWindow(QMainWindow):
         """新建项目"""
         self.flow_canvas.clear()
         self.statusbar.showMessage('新建项目')
+        self._reset_warmup_state()
         
     def _open_project(self):
         """加载流程文件"""
@@ -387,10 +431,11 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, '加载流程', start_dir, 'Pipeline (*.json);;All (*)')
         if not path:
             return
+        # 打开项目前重置预热状态
+        self._reset_warmup_state()
         ok = self.flow_canvas.load_from_file(path)
         if ok:
             self.statusbar.showMessage(f'加载成功: {path}')
-            # sample.json 视为模板，不做当前保存路径
             if os.path.basename(path).lower() == 'sample.json':
                 self._current_pipeline_path = None
                 self.statusbar.showMessage('加载模板 sample.json，保存将提示新文件名')
@@ -591,7 +636,7 @@ class MainWindow(QMainWindow):
                     self.pipeline_executor.input_queue.put({})
             except Exception:
                 pass
-            time.sleep(0.5)
+            time.sleep(self._feeder_interval_sec if self._feeder_interval_sec > 0 else 0.01)
 
     def _on_executor_progress(self, count: int, exec_time: float):
         self.statusbar.showMessage(f'执行次数: {count} | 最近耗时: {exec_time:.3f}s')
@@ -687,6 +732,7 @@ class MainWindow(QMainWindow):
         # GPU 多卡信息 / NVML 或 torch 回退
         if self._gpu_available and getattr(self, '_pynvml', None) and self._gpu_handles:
             segments = []
+            gpu_util_values = []
             try:
                 for idx, h in enumerate(self._gpu_handles):
                     try:
@@ -694,27 +740,36 @@ class MainWindow(QMainWindow):
                         util_info = self._pynvml.nvmlDeviceGetUtilizationRates(h)
                         used_mb = mem_info.used / 1024**2
                         total_mb = mem_info.total / 1024**2
-                        percent = (mem_info.used / mem_info.total) * 100.0 if mem_info.total else 0.0
-                        if idx == 0:
-                            gpu_mem_percent = percent
-                        segments.append(f"GPU{idx}:{used_mb:.0f}/{total_mb:.0f}MB {util_info.gpu}%")
+                        mem_percent = (mem_info.used / mem_info.total) * 100.0 if mem_info.total else 0.0
+                        gpu_util_values.append(util_info.gpu)
+                        segments.append(f"GPU{idx}:{used_mb:.0f}/{total_mb:.0f}MB {mem_percent:.0f}% util {util_info.gpu}%")
                     except Exception:
                         segments.append(f"GPU{idx}:n/a")
                 gpu_txt = ' | '.join(segments)
+                if gpu_util_values:
+                    gpu_bar_percent = sum(gpu_util_values) / len(gpu_util_values)  # 平均核心利用率
+                else:
+                    gpu_bar_percent = 0.0
             except Exception:
-                gpu_mem_percent = None
+                gpu_bar_percent = None
         else:
             try:
                 import torch
                 if torch.cuda.is_available():
                     props = torch.cuda.get_device_properties(0)
                     total_mb = props.total_memory / 1024**2
-                    used_mb = torch.cuda.memory_allocated(0) / 1024**2
-                    gpu_mem_percent = (used_mb/total_mb)*100.0 if total_mb else 0.0
+                    # 优先 reserved (更接近实际占用)，否则 allocated
+                    reserved = torch.cuda.memory_reserved(0) / 1024**2 if hasattr(torch.cuda, 'memory_reserved') else 0.0
+                    allocated = torch.cuda.memory_allocated(0) / 1024**2
+                    used_mb = reserved if reserved > 0 else allocated
+                    mem_percent = (used_mb/total_mb)*100.0 if total_mb else 0.0
                     name = torch.cuda.get_device_name(0)
-                    gpu_txt = f"{name} {used_mb:.0f}/{total_mb:.0f}MB"
+                    gpu_txt = f"{name} {used_mb:.0f}/{total_mb:.0f}MB {mem_percent:.0f}%"
+                    gpu_bar_percent = mem_percent  # 回退时用显存百分比
+                else:
+                    gpu_bar_percent = None
             except Exception:
-                gpu_mem_percent = None
+                gpu_bar_percent = None
         # 磁盘
         try:
             import psutil, pathlib
@@ -731,8 +786,9 @@ class MainWindow(QMainWindow):
             self.cpu_bar.setValue(int(cpu_percent))
         else:
             self.cpu_bar.setValue(0)
-        if gpu_mem_percent is not None:
-            self.gpu_bar.setValue(int(gpu_mem_percent)); self.gpu_bar.setEnabled(True)
+        if gpu_bar_percent is not None:
+            show_val = int(gpu_bar_percent if gpu_bar_percent >= 1 else (1 if gpu_bar_percent > 0 else 0))
+            self.gpu_bar.setValue(show_val); self.gpu_bar.setEnabled(True)
         else:
             self.gpu_bar.setValue(0); self.gpu_bar.setEnabled(False)
         if disk_percent is not None:
@@ -740,9 +796,148 @@ class MainWindow(QMainWindow):
         else:
             self.disk_bar.setValue(0); self.disk_bar.setEnabled(False)
         self.sysinfo_label.setText(f"CPU: {cpu_txt} | GPU: {gpu_txt} | Disk: {disk_txt}")
+        # 更新 YOLO 预热进度条
+        self._update_warmup_bar()
+
+    def _update_warmup_bar(self):
+        """更新 YOLO 预热进度条: 紫色=进行中, 绿色=全部完成(持久化), 灰色=未开始或无 YOLO."""
+        # 若已持久化完成：保持绿色，除非画布不再有 YOLO 模块
+        if self._warmup_completed_persist:
+            try:
+                modules = getattr(self.flow_canvas, 'modules', [])
+            except Exception:
+                modules = []
+            has_yolo = False
+            for m in modules:
+                ref = getattr(m, 'module_ref', None)
+                if not ref:
+                    continue
+                try:
+                    caps = getattr(ref, 'CAPABILITIES', None)
+                    if caps and 'yolo' in getattr(caps, 'resource_tags', []):
+                        has_yolo = True; break
+                except Exception:
+                    pass
+            if has_yolo:
+                if self._warmup_bar_last_style != 'completed':
+                    self._apply_warmup_bar_style('completed')
+                self.warmup_bar.setEnabled(True)
+                self.warmup_bar.setValue(100)
+                return
+            else:
+                # 无 YOLO 模块 → 重置
+                self._reset_warmup_state()
+        # 实时统计
+        try:
+            modules = getattr(self.flow_canvas, 'modules', [])
+        except Exception:
+            modules = []
+        total_yolo = 0
+        active_count = 0
+        progresses = []
+        all_done = True
+        for m in modules:
+            ref = getattr(m, 'module_ref', None)
+            if not ref:
+                continue
+            try:
+                caps = getattr(ref, 'CAPABILITIES', None)
+                if not (caps and 'yolo' in getattr(caps, 'resource_tags', [])):
+                    continue
+                total_yolo += 1
+                warming = getattr(ref, '_warming', False)
+                done = getattr(ref, '_warmup_done', False)
+                cfg = getattr(ref, 'config', {}) if isinstance(getattr(ref, 'config', {}), dict) else {}
+                total_iter = int(cfg.get('warmup_iterations', 0))
+                completed_iter = int(getattr(ref, '_warmup_iters_completed', 0))
+                mod_complete = bool(done or (total_iter == 0 and not warming))
+                if not mod_complete:
+                    all_done = False
+                if warming and not done and total_iter > 0:
+                    active_count += 1
+                    pct = max(0.0, min(100.0, (completed_iter / total_iter) * 100.0))
+                    progresses.append(pct)
+            except Exception:
+                pass
+        if total_yolo == 0:
+            self.warmup_bar.setValue(0)
+            self.warmup_bar.setEnabled(False)
+            if self._warmup_bar_last_style != 'inactive':
+                self._apply_warmup_bar_style('inactive')
+            return
+        if active_count > 0 and progresses:
+            avg_pct = sum(progresses)/len(progresses)
+            self.warmup_bar.setEnabled(True)
+            self.warmup_bar.setValue(int(avg_pct))
+            if self._warmup_bar_last_style != 'active':
+                self._apply_warmup_bar_style('active')
+            detail = ', '.join(f"{int(p)}%" for p in progresses)
+            self.warmup_bar.setToolTip(f"YOLO 预热进行中: {active_count}/{total_yolo} | 平均 {avg_pct:.1f}% | 详情 [{detail}]")
+        else:
+            if all_done:
+                self._warmup_completed_persist = True
+                self.warmup_bar.setEnabled(True)
+                self.warmup_bar.setValue(100)
+                if self._warmup_bar_last_style != 'completed':
+                    self._apply_warmup_bar_style('completed')
+                self.warmup_bar.setToolTip(f"YOLO 预热已完成: {total_yolo} 个模块")
+            else:
+                self.warmup_bar.setEnabled(False)
+                self.warmup_bar.setValue(0)
+                if self._warmup_bar_last_style != 'inactive':
+                    self._apply_warmup_bar_style('inactive')
+                self.warmup_bar.setToolTip("YOLO 预热未开始或等待首次推理触发")
+
+    def _apply_warmup_bar_style(self, mode: str):
+        """设置预热进度条样式: inactive(灰), active(紫), completed(绿)."""
+        styles = {
+            'inactive': "QProgressBar { border:1px solid #bbb; background:#eee; } QProgressBar::chunk { background:#bdbdbd; }",
+            'active': "QProgressBar { border:1px solid #bbb; background:#eee; } QProgressBar::chunk { background:#9c27b0; }",
+            'completed': "QProgressBar { border:1px solid #bbb; background:#eee; } QProgressBar::chunk { background:#4caf50; }",
+        }
+        self.warmup_bar.setStyleSheet(styles.get(mode, styles['inactive']))
+        self._warmup_bar_last_style = mode
+
+    def _reset_warmup_state(self):
+        """项目切换时重置预热持久化状态."""
+        self._warmup_completed_persist = False
+        if hasattr(self, 'warmup_bar'):
+            self.warmup_bar.setValue(0)
+            self.warmup_bar.setEnabled(False)
+            self._apply_warmup_bar_style('inactive')
+            self.warmup_bar.setToolTip("YOLO 模型预热进度 (全部模块平均百分比) | 绿色=完成 | 紫色=进行中 | 灰色=未开始")
+
+    # ---------- 用户设置持久化 ----------
+    def _load_user_settings(self):
+        """加载用户设置 (运行间隔等); 若文件不存在或格式错误则使用默认。"""
+        try:
+            if not os.path.isfile(self._settings_path):
+                return
+            with open(self._settings_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                run_ms = data.get('run_interval_ms')
+                if isinstance(run_ms, (int, float)) and 50 <= run_ms <= 10000:
+                    self._feeder_interval_sec = max(0.05, run_ms/1000.0)
+        except Exception as e:
+            # 读取失败忽略，保持默认
+            print(f"加载用户设置失败: {e}")
+
+    def _persist_user_settings(self):
+        """保存当前运行间隔等设置到 settings.json。"""
+        try:
+            data = {
+                'run_interval_ms': int(self._feeder_interval_sec * 1000),
+                'ts': time.time()
+            }
+            with open(self._settings_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            if hasattr(self, 'statusbar'):
+                self.statusbar.showMessage(f'保存设置失败: {e}', 3000)
 
     def _restore_window_state(self):
-        """恢复窗口几何和停靠布局"""
+        """恢复窗口几何和停靠布局 (若之前保存)."""
         try:
             if not os.path.isfile(self._window_state_path):
                 return
@@ -757,13 +952,22 @@ class MainWindow(QMainWindow):
             print(f"恢复窗口状态失败: {e}")
 
     def _toggle_system_info(self, checked: bool):
+        """开启/关闭系统信息与性能指标定时刷新。"""
         self._sysinfo_enabled = bool(checked)
         if self._sysinfo_enabled:
-            self._sysinfo_timer.start(); self._metrics_timer.start()
-            self.statusbar.showMessage('系统信息轮询已开启')
+            try:
+                self._sysinfo_timer.start(); self._metrics_timer.start()
+            except Exception:
+                pass
+            if hasattr(self, 'statusbar'):
+                self.statusbar.showMessage('系统信息轮询已开启', 2500)
         else:
-            self._sysinfo_timer.stop(); self._metrics_timer.stop()
-            self.statusbar.showMessage('系统信息轮询已关闭')
+            try:
+                self._sysinfo_timer.stop(); self._metrics_timer.stop()
+            except Exception:
+                pass
+            if hasattr(self, 'statusbar'):
+                self.statusbar.showMessage('系统信息轮询已关闭', 2500)
 
     # ---------- 性能指标刷新 ----------
     def _on_executor_metrics(self, nodes: dict, aggregate: dict):
@@ -837,7 +1041,7 @@ class MainWindow(QMainWindow):
 
     def _auto_load_last_project(self):
         """尝试自动加载最近记录的项目，如果存在且未显式指定新项目。"""
-        if self._current_pipeline_path:  # 已有当前路径时不自动加载
+        if self._current_pipeline_path:
             return
         if not os.path.exists(self._last_project_meta_path):
             return
@@ -846,7 +1050,8 @@ class MainWindow(QMainWindow):
                 meta = json.load(f)
             recent_path = meta.get('pipeline_path')
             if recent_path and os.path.exists(recent_path) and recent_path.lower().endswith('.json'):
-                # 使用增量加载，缓解启动卡顿
+                # 项目切换时重置预热持久化状态
+                self._reset_warmup_state()
                 def _progress(done, total):
                     self.statusbar.showMessage(f'热加载进度: {done}/{total} 模块')
                 def _finished(ok):
@@ -860,5 +1065,51 @@ class MainWindow(QMainWindow):
                 else:
                     ok = self.flow_canvas.load_from_file(recent_path)
                     _finished(ok)
+                from PyQt6.QtCore import QTimer as _QT
+                _QT.singleShot(1200, self._auto_preheat_models)
         except Exception as e:
             self.statusbar.showMessage(f'自动加载异常: {e}')
+
+    def _auto_preheat_models(self):
+        """遍历画布中模块, 对 YOLO 类型模块执行 warmup_async 降低首帧卡顿."""
+        if not getattr(self, '_auto_preheat_enabled', True):
+            return
+        try:
+            modules = getattr(self.flow_canvas, 'modules', [])
+        except Exception:
+            modules = []
+        targets = []
+        for m in modules:
+            ref = getattr(m, 'module_ref', None)
+            if not ref:
+                continue
+            try:
+                caps = getattr(ref, 'CAPABILITIES', None)
+                if caps and 'yolo' in getattr(caps, 'resource_tags', []):
+                    targets.append(ref)
+            except Exception:
+                pass
+        if not targets:
+            return
+        def _worker(refs):
+            for r in refs:
+                try:
+                    if hasattr(r, 'warmup_async'):
+                        r.warmup_async()
+                except Exception:
+                    pass
+            # 使用线程安全的异步状态更新
+            self._post_status(f'YOLO预热已触发: {len(refs)} 个', 4000)
+        import threading
+        threading.Thread(target=_worker, args=(targets,), daemon=True, name='yolo-preheat-thread').start()
+
+    def _post_status(self, message: str, timeout_ms: int = 3000):
+        """线程安全地在主线程更新状态栏消息。"""
+        try:
+            from PyQt6.QtCore import QTimer, QObject
+            # 若当前就在主线程直接调用
+            if hasattr(self, 'statusbar'):
+                # 使用 singleShot 保证在主事件循环执行（避免子线程直接操作）
+                QTimer.singleShot(0, lambda: self.statusbar.showMessage(message, timeout_ms))
+        except Exception:
+            pass

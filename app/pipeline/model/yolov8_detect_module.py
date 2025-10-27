@@ -58,6 +58,10 @@ class YoloV8DetectModule(BaseModule):
         enable_target_filter: bool = False  # 是否只输出指定目标类别
         target_classes: List[str] = []       # 目标类别名称(与模型 names 对应, 留空表示不过滤)
         annotate_filtered_only: bool = False  # 标注图是否仅显示过滤后结果
+        background_warmup: bool = True        # 是否在后台执行模型预热
+        warmup_iterations: int = 2            # 预热推理次数 (≥0)
+        warmup_image_size: int = 640          # 预热使用的方形图尺寸 (640x640)
+        deferred_first_infer: bool = True     # 若为 True, 在预热未完成时 process 返回 warming 状态
 
         @validator("confidence")
         def _conf(cls, v):
@@ -86,6 +90,10 @@ class YoloV8DetectModule(BaseModule):
             "enable_target_filter": False,
             "target_classes": [],
             "annotate_filtered_only": False,
+            "background_warmup": True,
+            "warmup_iterations": 2,
+            "warmup_image_size": 640,
+            "deferred_first_infer": True,
         })
         self._model = None
         self._model_loaded = False
@@ -94,6 +102,12 @@ class YoloV8DetectModule(BaseModule):
         # 最近一次推理的尺寸 (H,W,C)
         self._last_raw_shape: Optional[tuple] = None
         self._last_annotated_shape: Optional[tuple] = None
+        # 预热相关状态
+        self._warming: bool = False
+        self._warmup_done: bool = False
+        self._warmup_error: Optional[str] = None
+        self._warmup_iters_completed: int = 0
+        self._warmup_thread = None
 
     @property
     def module_type(self) -> ModuleType:
@@ -138,6 +152,9 @@ class YoloV8DetectModule(BaseModule):
             # 取类别名称
             self._names = getattr(self._model, "names", {}) or {}
             self._model_loaded = True
+            # 启动后台预热线程（可选）
+            if bool(self.config.get("background_warmup", True)):
+                self._start_warmup_thread()
         except Exception as e:
             # 若报错与 weights_only 相关，提示可能的兼容问题
             msg = str(e)
@@ -150,6 +167,14 @@ class YoloV8DetectModule(BaseModule):
         # 释放模型引用（便于显式 GC）
         self._model = None
         self._model_loaded = False
+        # 等待预热线程结束
+        try:
+            if self._warming and self._warmup_thread is not None:
+                import threading
+                if isinstance(self._warmup_thread, threading.Thread):
+                    self._warmup_thread.join(timeout=0.5)
+        except Exception:
+            pass
 
     def process(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         img = inputs.get("image")
@@ -157,6 +182,9 @@ class YoloV8DetectModule(BaseModule):
             return {"status": "no-image"}
         if not self._model_loaded or self._model is None:
             return {"status": f"model-unloaded: {self._failed_reason or 'unknown'}"}
+        # 若启用了 deferred_first_infer 并且预热未完成，直接返回 warming 状态
+        if bool(self.config.get("deferred_first_infer", True)) and self._warming and not self._warmup_done:
+            return {"status": f"warming:{self._warmup_iters_completed}/{self.config.get('warmup_iterations', 0)}"}
         # 规范图像: 保证 3 通道
         arr = img
         if arr.ndim == 2:
@@ -197,7 +225,7 @@ class YoloV8DetectModule(BaseModule):
                             mapped.append(int(name_to_idx[key]))
                     if mapped:
                         predict_kwargs["classes"] = mapped
-                print(mapped)
+                # print(mapped)
             results = self._model.predict(**predict_kwargs)
         except Exception as e:
             return {"status": f"infer-error: {e}"}
@@ -324,5 +352,61 @@ class YoloV8DetectModule(BaseModule):
             "classes": list(self._names.values()),
             "last_raw_shape": self._last_raw_shape,
             "last_annotated_shape": self._last_annotated_shape,
+            "warming": self._warming,
+            "warmup_done": self._warmup_done,
+            "warmup_error": self._warmup_error,
+            "warmup_iters_completed": self._warmup_iters_completed,
         })
         return base
+
+    def warmup_async(self):
+        """对外公开的预热触发接口: 若模型未加载则先加载, 再启动后台预热线程.
+        可在 GUI 启动或项目加载后统一调用, 避免首次真实调用时卡顿.
+        """
+        try:
+            if not self._model_loaded:
+                self._on_start()
+            if self._model_loaded and not self._warmup_done and not self._warming:
+                self._start_warmup_thread()
+        except Exception as e:
+            self._warmup_error = f"warmup-async-error: {e}"
+
+    # ---------------- 预热实现 -----------------
+    def _start_warmup_thread(self):
+        if self._warming or self._warmup_done or not self._model_loaded or self._model is None:
+            return
+        import threading
+        self._warming = True
+        self._warmup_error = None
+        self._warmup_iters_completed = 0
+        iters = max(0, int(self.config.get("warmup_iterations", 0)))
+        img_size = int(self.config.get("warmup_image_size", 640))
+        device = self._select_device()
+        half = bool(self.config.get("half", False)) and device.startswith("cuda")
+
+        def _run_warmup():
+            try:
+                if iters <= 0:
+                    return
+                # 构造随机张量作为输入 (BGR 彩色)
+                import numpy as _np
+                dummy = (_np.random.rand(img_size, img_size, 3) * 255).astype(_np.uint8)
+                for i in range(iters):
+                    try:
+                        self._model.predict(source=dummy, conf=float(self.config.get("confidence", 0.25)),
+                                            verbose=False, max_det=int(self.config.get("max_det", 100)),
+                                            agnostic_nms=bool(self.config.get("agnostic_nms", False)),
+                                            device=device, half=half)
+                    except Exception as _ie:
+                        # 记录但继续下一次
+                        self._warmup_error = f"warmup-infer-error: {_ie}"
+                        break
+                    self._warmup_iters_completed = i + 1
+            except Exception as e:
+                self._warmup_error = f"warmup-error: {e}"
+            finally:
+                self._warming = False
+                self._warmup_done = True if self._warmup_error is None else False
+        th = threading.Thread(target=_run_warmup, name=f"yolo8-warmup-{self.name}", daemon=True)
+        self._warmup_thread = th
+        th.start()

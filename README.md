@@ -209,6 +209,7 @@ GUI 属性面板会优先尝试读取模块的 `ConfigModel.__fields__`，为每
 7. 流程结构新增 `groups`：格式为 `{group_id, title, x, y, width, height, members}`，兼容旧版本（无该字段时忽略）。
 8. YOLOv8 模型模块（检测/分类/分割）已集成，输出带注释图像与结构化结果，可与图片展示/保存模块串联。
 9. YOLOv8 过滤增强：支持 `target_classes` (名称或数字索引混合) 与 `enable_target_filter` 开关，只输出/标注指定目标；提供 `export_raw` 控制是否输出原始图端口；检测与分割模块新增 `annotate_filtered_only` 开关仅绘制过滤后目标（减少视觉噪声）。
+10. YOLOv8 模型预热与延迟首帧：检测与分割模块新增 `background_warmup`/`warmup_iterations`/`warmup_image_size`/`deferred_first_infer` 配置，启动后在后台执行若干次随机张量推理以提前完成 CUDA 上下文与卷积内核编译，降低首帧卡顿。预热进行中若启用 `deferred_first_infer`，正常输入会返回 `status = warming:x/y` 并暂不阻塞主线程。
 
 ### 2025-10-20
 1. 模块可调整大小（右下角拖拽或边缘）。
@@ -289,6 +290,46 @@ confidence = 0.35
 
 ### 性能提示
 预过滤（names -> indices）可降低后处理对象数量；标注仅绘制过滤子集减少绘制开销（特别是大量实例场景）。
+
+### 预热与延迟首帧配置 (减少首次运行卡顿)
+检测/分割模块新增以下配置字段：
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| background_warmup | bool | True | 是否在后台启动预热线程 |
+| warmup_iterations | int | 检测:2 分割:1 | 预热推理次数 (≥0，0 表示不预热) |
+| warmup_image_size | int | 640 | 构造随机张量时的方形尺寸 (WxH) |
+| deferred_first_infer | bool | True | 预热未完成时 `process()` 不立即执行真实推理，返回 `warming:x/y` 状态 |
+
+工作流程：
+1. 模型文件加载完成后若 `background_warmup=True` 启动守护线程。
+2. 线程执行 `warmup_iterations` 次随机图像推理，触发 CUDA context 创建、卷积/算子编译与权重迁移。
+3. `get_status()` 可查询：`warming` (bool), `warmup_done` (bool), `warmup_error` (str|None), `warmup_iters_completed` (int)。
+4. 若 `deferred_first_infer=True` 且仍在 `warming`，外部调用 `process()` 返回 `{"status": "warming:i/n"}`，避免阻塞；一旦完成后正常返回检测/分割结果。
+
+调整策略：
+- 希望最短启动时延：降低或关闭 `warmup_iterations`，但首帧仍可能存在编译延迟。
+- 重视首帧体验：保持默认或增加迭代次数（如 3~5），牺牲少量后台时间换取后续更平滑的实时推理。
+- 使用较大模型时可将 `warmup_image_size` 调整为实际常用尺寸（如 512），减少不必要的显存峰值。
+
+错误处理：预热过程中异常会写入 `warmup_error`，同时 `warmup_done=False`；此时仍可进行真实推理，只是丢失预热收益。
+
+示例：
+```
+background_warmup = true
+warmup_iterations = 3
+warmup_image_size = 640
+deferred_first_infer = true
+```
+含义：后台进行 3 次 640x640 随机图预热，预热完成前输入返回 warming 状态；完成后恢复正常推理。
+
+#### 自动统一预热（启动项目时）
+主窗口增加“监控”菜单项“自动YOLO预热”（默认开启）。项目热加载或手动打开后，系统会延迟 ~1.2s 扫描画布上所有带 `resource_tags` 包含 `yolo` 的模块，并调用其 `warmup_async()`：
+- 若模块尚未加载模型，会先执行加载再启动预热线程。
+- 预热次数由各模块自己的 `warmup_iterations` 决定（检测/分割/分类可不同）。
+- 关闭该菜单开关后，不再自动触发，可按需在运行前手动点击模块的某个“测试运行”来隐式触发。
+
+禁用方式：监控 -> 取消勾选 “自动YOLO预热”。
+适用场景：需要快速进入编辑流程而暂不消耗 GPU；或在多模型场景希望分批手动控制显存峰值。
 
 ## 保存文本模块 (保存文本)
 
