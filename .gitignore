@@ -1,0 +1,96 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env/
+.venv/
+venv/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+.pytest_cache/
+.coverage
+.coverage.*
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+htmlcov/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Logs
+logs/
+*.log
+
+# VS Code / IDE settings
+.vscode/
+.idea/
+*.code-workspace
+
+# Type checker caches
+.mypy_cache/
+.pyre/
+.pytype/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Generated outputs (ignore all pipeline/image outputs)
+outputs/
+# If you only want to ignore images subfolder instead, replace above with:
+# outputs/images/
+
+# Model weights (uncomment if large weights shouldn't be tracked)
+# *.pt
+
+# Local configs or secrets (add as needed)
+# config/local_*.json
+
+# Ignore last run state
+last_project.json
+
+# Yarn / Node (if ever added)
+node_modules/
+
+# Cache for tools
+.cache/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Profiling data
+.prof
+
+# Rust / other build artifacts (future extension)
+Cargo.lock
+target/
+
+# Backup files
+*.bak
+
+# Generated resources (uncomment if style overrides are generated)
+# resources/styles/generated/
