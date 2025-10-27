@@ -98,6 +98,11 @@ try:
     register_module("后处理", PostprocessModule)
 except Exception as e:
     pass
+try:
+    from .postprocess.yolo_result_bool_module import YoloResultBoolModule
+    register_module("检测结果布尔判断", YoloResultBoolModule)
+except Exception:
+    pass
 
 # 新增: 文本输入与打印模块
 ############################################################
