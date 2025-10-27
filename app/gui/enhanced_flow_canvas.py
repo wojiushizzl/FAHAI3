@@ -982,21 +982,33 @@ class EnhancedFlowCanvas(QGraphicsView):
         from app.pipeline.module_registry import list_registered_modules, get_module_class
         from app.pipeline.base_module import ModuleType
         menu = QMenu(self)
-        groups = {'输入': [], '处理': [], '输出': [], '自定义': []}
-        for name in list_registered_modules():
+        # 新分类映射 (名称/前缀模式归类): 输入 / 模型 / 显示 / 存储 / 协议 / 脚本 / 逻辑 / 其它
+        groups = {'输入': [], '模型': [], '显示': [], '存储': [], '协议': [], '脚本': [], '逻辑': [], '其它': []}
+        names = list_registered_modules()
+        for name in names:
+            low = name.lower()
             cls = get_module_class(name)
+            # 模块类型用于基础分类，名称用于细化
             try:
                 mtype = cls(name=name).module_type if cls else ModuleType.CUSTOM
             except Exception:
                 mtype = ModuleType.CUSTOM
-            if mtype in [ModuleType.CAMERA, ModuleType.TRIGGER]:
-                groups['输入'].append(name)
-            elif mtype == ModuleType.MODEL:
-                groups['处理'].append(name)
-            elif mtype == ModuleType.POSTPROCESS:
-                groups['输出'].append(name)
-            else:
-                groups['自定义'].append(name)
+            target_key = '其它'
+            if mtype in [ModuleType.CAMERA, ModuleType.TRIGGER] or ('路径' in name):
+                target_key = '输入'
+            elif mtype == ModuleType.MODEL or 'yolov8' in low or 'model' in low:
+                target_key = '模型'
+            elif ('展示' in name) or ('显示' in name):
+                target_key = '显示'
+            elif ('保存' in name) or ('save' in low):
+                target_key = '存储'
+            elif 'modbus' in low:
+                target_key = '协议'
+            elif '脚本' in name or 'script' in low:
+                target_key = '脚本'
+            elif ('逻辑' in name) or ('延时' in name) or ('示例' in name) or ('文本输入' in name) or ('打印' == name) or ('print' in low):
+                target_key = '逻辑'
+            groups[target_key].append(name)
         for g, items in groups.items():
             if not items:
                 continue

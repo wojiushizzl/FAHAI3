@@ -100,82 +100,73 @@ except Exception as e:
     pass
 
 # 新增: 文本输入与打印模块
+############################################################
+# 新的分类结构: input / display / storage / script / utility
+# 旧 custom 模块仍保留以兼容外部直接导入路径；这里统一从新路径注册。
+############################################################
 try:
-    from .custom.text_input_module import TextInputModule
+    from .utility.text_input_module import TextInputModule
     register_module("文本输入", TextInputModule)
-except Exception as e:
+except Exception:
     pass
-
 try:
-    from .custom.print_module import PrintModule
+    from .utility.print_module import PrintModule
     register_module("打印", PrintModule)
-except Exception as e:
+except Exception:
     pass
-
-# 示例扩展: 延时模块
 try:
-    from .custom.delay_module import DelayModule
+    from .utility.delay_module import DelayModule
     register_module("延时", DelayModule)
-except Exception as e:
+except Exception:
     pass
-
-# 逻辑模块
 try:
-    from .custom.logic_module import LogicModule
+    from .utility.logic_module import LogicModule
     register_module("逻辑", LogicModule)
-except Exception as e:
+except Exception:
     pass
-
-# 图片展示模块
 try:
-    from .custom.image_display_module import ImageDisplayModule
+    from .utility.path_selector_module import PathSelectorModule
+    register_module("路径选择器", PathSelectorModule)
+except Exception:
+    pass
+try:
+    from .utility.sample_dev_module import SampleDevModule
+    register_module("示例模块", SampleDevModule)
+except Exception:
+    pass
+try:
+    from .display.image_display_module import ImageDisplayModule
     register_module("图片展示", ImageDisplayModule)
-except Exception as e:
-    pass
-
-# 保存图片模块
-try:
-    from .custom.save_image_module import SaveImageModule
-    register_module("保存图片", SaveImageModule)
-except Exception as e:
+except Exception:
     pass
 try:
-    from .custom.save_text_module import SaveTextModule
-    register_module("保存文本", SaveTextModule)
-except Exception as e:
-    pass
-
-# 打印显示模块（文本实时显示）
-try:
-    from .custom.print_display_module import PrintDisplayModule
+    from .display.print_display_module import PrintDisplayModule
     register_module("打印显示", PrintDisplayModule)
-except Exception as e:
+except Exception:
     pass
 try:
-    from .custom.text_display_module import TextDisplayModule
+    from .display.text_display_module import TextDisplayModule
     register_module("文本展示", TextDisplayModule)
 except Exception:
     pass
-
-# 路径选择器模块
 try:
-    from .custom.path_selector_module import PathSelectorModule
-    register_module("路径选择器", PathSelectorModule)
-except Exception as e:
-    pass
-try:
-    from .custom.ok_nok_display_module import OkNokDisplayModule
+    from .display.ok_nok_display_module import OkNokDisplayModule
     register_module("OK/NOK展示", OkNokDisplayModule)
-except Exception as e:
-    pass
-try:
-    from .custom.script_module import ScriptModule
-    register_module("脚本模块", ScriptModule)
 except Exception:
     pass
 try:
-    from .custom.sample_dev_module import SampleDevModule
-    register_module("示例模块", SampleDevModule)
+    from .storage.save_image_module import SaveImageModule
+    register_module("保存图片", SaveImageModule)
+except Exception:
+    pass
+try:
+    from .storage.save_text_module import SaveTextModule
+    register_module("保存文本", SaveTextModule)
+except Exception:
+    pass
+try:
+    from .script.script_module import ScriptModule
+    register_module("脚本模块", ScriptModule)
 except Exception:
     pass
 

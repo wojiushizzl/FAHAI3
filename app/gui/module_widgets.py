@@ -51,63 +51,99 @@ class ModuleToolbox(QWidget):
         self.refresh_modules()
 
     def refresh_modules(self):
+        """刷新模块树，按新分类体系分组: 输入 / 模型 / 显示 / 存储 / 协议 / 脚本 / 逻辑 / 其它
+        规则与 EnhancedFlowCanvas.contextMenuEvent 中保持一致，避免分类不一致。
+        """
         self.tree.clear()
-        groups = {
-            '输入': [],
-            '处理': [],
-            '输出': [],
-            '自定义': []
-        }
-        for display in list_registered_modules():
-            cls = get_module_class(display)
-            if not cls:
-                groups['自定义'].append(display)
-                continue
+
+        groups = {k: [] for k in ['输入', '模型', '显示', '存储', '协议', '脚本', '逻辑', '其它']}
+
+        def classify(name: str, cls) -> str:
+            low = name.lower()
+            # 基础类型推断
             try:
-                mtype = cls(name=display).module_type
+                mtype = cls(name=name).module_type if cls else ModuleType.CUSTOM
             except Exception:
                 mtype = ModuleType.CUSTOM
-            if mtype == ModuleType.CAMERA or mtype == ModuleType.TRIGGER:
-                groups['输入'].append(display)
-            elif mtype == ModuleType.MODEL:
-                groups['处理'].append(display)
-            elif mtype == ModuleType.POSTPROCESS:
-                groups['输出'].append(display)
-            else:
-                groups['自定义'].append(display)
+            # 映射逻辑 (与 enhanced_flow_canvas.py 中保持相同顺序与条件)
+            if mtype in [ModuleType.CAMERA, ModuleType.TRIGGER] or ('路径' in name):
+                return '输入'
+            if mtype == ModuleType.MODEL or 'yolov8' in low or 'model' in low:
+                return '模型'
+            if ('展示' in name) or ('显示' in name):
+                return '显示'
+            if ('保存' in name) or ('save' in low):
+                return '存储'
+            if 'modbus' in low:
+                return '协议'
+            if '脚本' in name or 'script' in low:
+                return '脚本'
+            if ('逻辑' in name) or ('延时' in name) or ('示例' in name) or ('文本输入' in name) or (name == '打印') or ('print' in low):
+                return '逻辑'
+            return '其它'
 
+        for display in list_registered_modules():
+            cls = get_module_class(display)
+            cat = classify(display, cls)
+            groups[cat].append(display)
+
+        # 构建树节点
         for gname, items in groups.items():
             if not items:
                 continue
             gnode = QTreeWidgetItem([gname])
+            # 分组节点不允许直接拖拽
             gnode.setFlags(gnode.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
             self.tree.addTopLevelItem(gnode)
             for mod in sorted(items):
                 inode = QTreeWidgetItem([mod])
                 inode.setData(0, Qt.ItemDataRole.UserRole, mod)
-                inode.setIcon(0, self._make_icon(mod))
+                inode.setIcon(0, self._make_icon(mod, gname))
                 gnode.addChild(inode)
             gnode.setExpanded(True)
-        # 自动列宽在初始渲染后可能导致过度收缩, 使用一个最小列宽保障可读性
+        # 最小列宽保障可读性
         self.tree.resizeColumnToContents(0)
         if self.tree.columnWidth(0) < 140:
             self.tree.setColumnWidth(0, 140)
         self._filter_tree(self.search_box.text())
 
-    def _make_icon(self, name: str) -> QIcon:
-        cls = get_module_class(name)
-        try:
-            module_type = cls(name=name).module_type if cls else ModuleType.CUSTOM
-        except Exception:
-            module_type = ModuleType.CUSTOM
+    def _make_icon(self, name: str, category: str | None = None) -> QIcon:
+        """生成简易彩色方块图标。根据分类而非旧 ModuleType 上色。"""
+        if category is None:
+            # 回退: 若未提供分类则尝试推断，与 refresh_modules 中逻辑保持一致
+            cls = get_module_class(name)
+            try:
+                module_type = cls(name=name).module_type if cls else ModuleType.CUSTOM
+            except Exception:
+                module_type = ModuleType.CUSTOM
+            low = name.lower()
+            if module_type in [ModuleType.CAMERA, ModuleType.TRIGGER] or ('路径' in name):
+                category = '输入'
+            elif module_type == ModuleType.MODEL or 'yolov8' in low or 'model' in low:
+                category = '模型'
+            elif ('展示' in name) or ('显示' in name):
+                category = '显示'
+            elif ('保存' in name) or ('save' in low):
+                category = '存储'
+            elif 'modbus' in low:
+                category = '协议'
+            elif '脚本' in name or 'script' in low:
+                category = '脚本'
+            elif ('逻辑' in name) or ('延时' in name) or ('示例' in name) or ('文本输入' in name) or (name == '打印') or ('print' in low):
+                category = '逻辑'
+            else:
+                category = '其它'
         color_map = {
-            ModuleType.CAMERA: '#4CAF50',
-            ModuleType.TRIGGER: '#FF9800',
-            ModuleType.MODEL: '#9C27B0',
-            ModuleType.POSTPROCESS: '#F44336',
-            ModuleType.CUSTOM: '#2196F3'
+            '输入': '#4CAF50',
+            '模型': '#9C27B0',
+            '显示': '#2196F3',
+            '存储': '#795548',
+            '协议': '#FF5722',
+            '脚本': '#607D8B',
+            '逻辑': '#3F51B5',
+            '其它': '#9E9E9E'
         }
-        col = color_map.get(module_type, '#607D8B')
+        col = color_map.get(category, '#607D8B')
         px = QPixmap(16,16)
         px.fill(Qt.GlobalColor.transparent)
         p = QPainter(px)

@@ -431,48 +431,59 @@ class SampleConfig(BaseModel):
 ---
 如需更详细的教程（端口类型规范、属性面板控件映射、热重载机制）请提出需求。示例模块是后续文档的基础模板，建议先复制再替换端口与处理逻辑。
 
-## 目录结构更新（模块分类）
+## 模块与文件结构（2025-10 重新整理）
 
-已将原先平铺在 `app/pipeline/` 下的模块按功能分类迁移：
+为提升可维护性与扩展性，将原 `custom` 目录内多功能混合模块按职责拆分为独立类别目录：
 
 ```
 app/pipeline/
   base_module.py
   module_registry.py
   pipeline_executor.py
-  camera/            # 相机相关模块
-    camera_module.py
-    image_import_module.py   # 图片导入/播放模块 (离线帧来源)
-  model/             # 模型推理模块
-    model_module.py
-  trigger/           # 触发控制模块
-    trigger_module.py
-  postprocess/       # 推理结果后处理模块
-    postprocess_module.py
-  custom/            # 通用/演示/辅助模块集合
-    text_input_module.py
-    print_module.py
-    delay_module.py
-    logic_module.py
-    image_display_module.py   # 图片展示模块 (画布缩略图显示)
+  camera/            # 采集与输入 (相机/离线图片)
+  trigger/           # 触发/计时/条件
+  model/             # 模型推理 (YOLOv8 等)
+  postprocess/       # 推理后处理与结果精炼
+  display/           # 可视化显示 (图片/文本/状态)
+  storage/           # 持久化 (保存图片/文本)
+  script/            # 脚本执行 (内联 Python)
+  utility/           # 通用工具 (路径选择/逻辑/延时/示例/文本输入/打印)
+  modbus/            # 协议交互 (连接/监听/写入/模拟服务器)
 ```
 
-兼容占位文件现已移除（`camera_module.py`、`model_module.py` 等已删除），请统一使用分类路径导入：
+兼容策略：原 `custom/*.py` 文件仍保留；新目录中放置同名轻量包装类（继承原类）以避免已有第三方或未更新脚本失效。后续版本将逐步迁移核心逻辑至新目录并在 `custom/` 中仅保留弃用提示。
 
+推荐新的导入方式：
+```python
+from app.pipeline.display.image_display_module import ImageDisplayModule
+from app.pipeline.storage.save_image_module import SaveImageModule
+from app.pipeline.script.script_module import ScriptModule
+from app.pipeline.utility.logic_module import LogicModule
+from app.pipeline.modbus.modbus_connect_module import ModbusConnectModule
 ```
-from app.pipeline.camera.camera_module import CameraModule
-from app.pipeline.model.model_module import ModelModule
-from app.pipeline.trigger.trigger_module import TriggerModule
-from app.pipeline.postprocess.postprocess_module import PostprocessModule
-from app.pipeline.custom.logic_module import LogicModule
-```
 
-说明：流程保存格式仅使用显示名，不受这一结构调整影响。若您有旧脚本，请更新导入路径；否则将出现 `ModuleNotFoundError`。
+分类说明：
+| 分类 | 作用 | 示例 |
+|------|------|------|
+| camera | 数据采集 | 相机 / 图片导入 |
+| model | 视觉推理 | yolov8检测 / 分类 / 分割 |
+| postprocess | 结果加工 | 后处理 / 逻辑过滤 |
+| display | 画布显示 | 图片展示 / 打印显示 / OK/NOK |
+| storage | 持久化 | 保存图片 / 保存文本 |
+| script | 动态处理 | 脚本模块（内联 Python） |
+| utility | 组合辅助 | 延时 / 路径选择 / 文本输入 / 示例 |
+| modbus | 工业协议 | 连接 / 监听 / 写入 / 模拟服务器 |
 
-迁移的好处：
-- 更清晰的分层（采集 / 推理 / 触发 / 后处理 / 自定义）。
-- 便于后续扩展同类别多实现（例如多个 CameraModule 子类）。
-- 减少主目录文件拥挤，提高可维护性。
+优势：
+1. 语义更明确：一眼识别职责分层。
+2. 便于团队协作：按目录分配维护责任。
+3. 后续扩展（如 MQTT/OPC UA）可直接新增协议子目录。
+4. 减少“custom”膨胀，避免模块定位困难。
+
+迁移提示：
+- 若你现有脚本仍使用 `app.pipeline.custom.*` 导入，不会立刻报错（保留包装）。
+- 新增模块时请直接在对应类别目录下创建并在 `module_registry.py` 中注册。
+- 长期建议更新第三方插件包的 entry points 实现目录映射，以提升一致性。
 
 如果你需要添加新的模块类别，只需：
 1. 创建新子目录与 `__init__.py`。  
