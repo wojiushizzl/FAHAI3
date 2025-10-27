@@ -593,18 +593,39 @@ class ModuleItem(QGraphicsRectItem):
         dark = False
         if hasattr(self, 'canvas') and hasattr(self.canvas, '_dark_theme'):
             dark = bool(getattr(self.canvas, '_dark_theme'))
-        # 类型颜色映射
-        type_colors = {
-            '相机': (QColor(70,130,180), QColor(90,150,200)),
-            '触发': (QColor(255,140,0), QColor(255,170,40)),
-            '模型': (QColor(100,70,150), QColor(130,90,180)),
-            '后处理': (QColor(200,60,60), QColor(220,90,90)),
-            '逻辑': (QColor(60,120,60), QColor(80,150,80)),
-            '打印显示': (QColor(50,90,140), QColor(70,110,160)),
-            '图片展示': (QColor(40,100,140), QColor(60,130,170)),
-            'OK/NOK展示': (QColor(90,90,90), QColor(120,120,120)),
+        # 按分类着色：与工具箱/右键菜单分类逻辑统一
+        name = self.module_type  # 显示名即分类判定依据
+        low = name.lower()
+        # 分类映射规则（复制自 contextMenuEvent / ModuleToolbox）
+        category = '其它'
+        try:
+            if ('路径' in name) or (name.startswith('相机')) or (name.startswith('触发')):
+                category = '输入'
+            elif ('模型' in name) or ('yolov8' in low) or ('model' in low):
+                category = '模型'
+            elif ('展示' in name) or ('显示' in name):
+                category = '显示'
+            elif ('保存' in name) or ('save' in low):
+                category = '存储'
+            elif 'modbus' in low:
+                category = '协议'
+            elif ('脚本' in name) or ('script' in low):
+                category = '脚本'
+            elif ('逻辑' in name) or ('延时' in name) or ('示例' in name) or ('文本输入' in name) or (name == '打印') or ('print' in low):
+                category = '逻辑'
+        except Exception:
+            category = '其它'
+        category_color_pairs = {
+            '输入': (QColor(76,175,80), QColor(102,187,106)),          # 绿色系
+            '模型': (QColor(142,36,170), QColor(171,71,188)),           # 紫色系
+            '显示': (QColor(30,136,229), QColor(66,165,245)),           # 蓝色系
+            '存储': (QColor(109,76,65), QColor(141,110,99)),            # 棕色系
+            '协议': (QColor(251,140,0), QColor(255,167,38)),            # 橙色系
+            '脚本': (QColor(84,110,122), QColor(120,144,156)),          # 灰蓝系
+            '逻辑': (QColor(57,73,171), QColor(92,107,192)),            # 靛青系
+            '其它': (QColor(117,117,117), QColor(158,158,158)),         # 中性灰
         }
-        base_pair = type_colors.get(self.module_type, (QColor(95,125,170), QColor(120,155,195)))
+        base_pair = category_color_pairs.get(category, (QColor(95,125,170), QColor(120,155,195)))
         c1, c2 = base_pair
         if dark:
             # 暗色下整体降低亮度并稍微提高饱和度
@@ -649,6 +670,15 @@ class ModuleItem(QGraphicsRectItem):
         painter.setPen(QPen(line_col, 1))
         from PyQt6.QtCore import QPointF as _QPF
         painter.drawLine(_QPF(rect.left()+4, rect.top()+20), _QPF(rect.right()-4, rect.top()+20))
+        # 分类标记文字（在右上角轻描显示分类首字）
+        try:
+            painter.setPen(QPen(QColor(255,255,255,90 if not dark else 140), 1))
+            f = QFont('Arial', 7)
+            painter.setFont(f)
+            abbrev = category[0] if category else '?'
+            painter.drawText(rect.adjusted(0,0,-4,0), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight, abbrev)
+        except Exception:
+            pass
         # 状态徽章绘制（错误/警告/缓存）
         status_color = None
         label_text = ''
