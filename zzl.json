@@ -1,52 +1,54 @@
 {
   "modules": [
     {
-      "module_id": "68016924-257f-40b8-bf18-71f79c77c198",
-      "module_type": "yolov8分类",
-      "x": 1913.9728247408934,
-      "y": 635.6008516232282,
-      "width": 140.0,
-      "height": 94.0,
+      "module_id": "e5371aae-e3f1-46fe-83aa-fcce9ae2d818",
+      "module_type": "打印显示",
+      "x": 2048.5646004801088,
+      "y": 582.2404406721533,
+      "width": 190.23469650205743,
+      "height": 228.0,
       "inputs": [
-        "image"
+        "data"
       ],
       "outputs": [
-        "image",
-        "results",
-        "status"
+        "text",
+        "changes"
       ],
       "config": {
-        "model_path": "yolov8n-cls.pt",
-        "device": "auto",
-        "top_n": 5,
-        "half": false
+        "max_lines": 10,
+        "truncate": 200,
+        "prefix": "",
+        "update_mode": "every",
+        "interval_ms": 0,
+        "merge_dict": true,
+        "show_timestamp": true
       },
       "state": {}
     },
     {
-      "module_id": "e45b85ca-8a40-49a0-b2d7-75d908269cba",
-      "module_type": "yolov8分类",
-      "x": 1730.541760735788,
-      "y": 499.5764567615456,
-      "width": 140.0,
-      "height": 94.0,
-      "inputs": [
-        "image"
-      ],
+      "module_id": "c6139255-86f1-4fb0-b889-8aa9aced44e5",
+      "module_type": "文本输入",
+      "x": 1852.314386145405,
+      "y": 582.2404406721539,
+      "width": 132.96714248971193,
+      "height": 86.028163580247,
+      "inputs": [],
       "outputs": [
-        "image",
-        "results",
-        "status"
+        "text"
       ],
-      "config": {
-        "model_path": "yolov8n-cls.pt",
-        "device": "auto",
-        "top_n": 5,
-        "half": false
-      },
-      "state": {}
+      "config": {},
+      "state": {
+        "text_value": "Hello"
+      }
     }
   ],
-  "connections": [],
+  "connections": [
+    {
+      "source_module": "c6139255-86f1-4fb0-b889-8aa9aced44e5",
+      "source_port": "text",
+      "target_module": "e5371aae-e3f1-46fe-83aa-fcce9ae2d818",
+      "target_port": "data"
+    }
+  ],
   "groups": []
 }

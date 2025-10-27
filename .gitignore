@@ -70,8 +70,6 @@ outputs/
 # Local configs or secrets (add as needed)
 # config/local_*.json
 
-# Ignore last run state
-last_project.json
 
 # Yarn / Node (if ever added)
 node_modules/
@@ -95,3 +93,6 @@ target/
 
 # Generated resources (uncomment if style overrides are generated)
 # resources/styles/generated/
+last_project.json
+last_view.json
+zzl.json
