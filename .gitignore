@@ -94,5 +94,6 @@ target/
 # Generated resources (uncomment if style overrides are generated)
 # resources/styles/generated/
 last_project.json
+user_data/
 last_view.json
 zzl.json

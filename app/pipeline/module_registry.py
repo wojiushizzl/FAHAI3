@@ -163,6 +163,11 @@ try:
     register_module("脚本模块", ScriptModule)
 except Exception:
     pass
+try:
+    from .custom.sample_dev_module import SampleDevModule
+    register_module("示例模块", SampleDevModule)
+except Exception:
+    pass
 
 # YOLOv8 模型系列模块 (检测/分类/分割)
 try:

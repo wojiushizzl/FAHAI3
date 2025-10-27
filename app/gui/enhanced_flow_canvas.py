@@ -168,6 +168,9 @@ class ModuleItem(QGraphicsRectItem):
             self._thumb_item.setPos(8, self._content_offset)
         if getattr(self, '_text_item', None):
             self._text_item.setPos(8, self._content_offset)
+        # 初始创建后立即居中标题
+        if hasattr(self, '_center_title'):
+            self._center_title()
 
     def refresh_ports(self):
         """根据 module_ref 的当前端口定义刷新图形端口。移除旧端口与标签并重建。
@@ -618,6 +621,8 @@ class EnhancedFlowCanvas(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setInteractive(True)
+        # 画布锁定：锁定后禁止添加/删除/移动/连线编辑，仍可查看与缩放、运行。
+        self._locked = False
         # 扩大画布尺寸以支持更大流程
         self.scene.setSceneRect(0,0,4000,3000)
         # 缩放/调整锚点，使缩放以鼠标位置为中心
@@ -658,10 +663,14 @@ class EnhancedFlowCanvas(QGraphicsView):
         self._viewer_timer.start()
 
     def add_module(self, module_type: str):
+        if self._locked:
+            return
         center = self.mapToScene(self.viewport().rect().center())
         self.add_module_at(module_type, QPointF(center.x()-70, center.y()-40))
 
     def add_module_at(self, module_type: str, pos: QPointF):
+        if self._locked:
+            return
         from app.pipeline.module_registry import get_module_class
         module_ref = None
         cls = get_module_class(module_type)
@@ -682,6 +691,8 @@ class EnhancedFlowCanvas(QGraphicsView):
             self._record_history()
 
     def clear(self):
+        if self._locked:
+            return
         self.scene.clear()
         self.modules.clear()
         self.connections.clear()
@@ -812,6 +823,8 @@ class EnhancedFlowCanvas(QGraphicsView):
     def contextMenuEvent(self, event):
         if self._pan_moved:  # 刚拖拽过不弹菜单
             return
+        if self._locked:
+            return  # 锁定时不弹编辑菜单
         from app.pipeline.module_registry import list_registered_modules, get_module_class
         from app.pipeline.base_module import ModuleType
         menu = QMenu(self)
@@ -873,12 +886,16 @@ class EnhancedFlowCanvas(QGraphicsView):
 
     # ---------- Drag & Drop from ModuleToolbox ----------
     def dragEnterEvent(self, event):
+        if self._locked:
+            event.ignore(); return
         if event.mimeData().hasFormat('application/x-fahai-module') or event.mimeData().text():
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event):
+        if self._locked:
+            event.ignore(); return
         if event.mimeData().hasFormat('application/x-fahai-module') or event.mimeData().text():
             event.acceptProposedAction()
             if event.mimeData().hasFormat('application/x-fahai-ports'):
@@ -893,6 +910,8 @@ class EnhancedFlowCanvas(QGraphicsView):
             event.ignore()
 
     def dropEvent(self, event):
+        if self._locked:
+            event.ignore(); QToolTip.hideText(); return
         module_type = None
         if event.mimeData().hasFormat('application/x-fahai-module'):
             module_type = bytes(event.mimeData().data('application/x-fahai-module')).decode('utf-8')
@@ -908,7 +927,7 @@ class EnhancedFlowCanvas(QGraphicsView):
             QToolTip.hideText()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Delete:
+        if event.key() == Qt.Key.Key_Delete and not self._locked:
             for it in self.scene.selectedItems():
                 if isinstance(it, ModuleItem):
                     self.scene.removeItem(it)
@@ -921,6 +940,8 @@ class EnhancedFlowCanvas(QGraphicsView):
 
     # ----- Connection drag logic -----
     def begin_temp_connection(self, start_point):
+        if self._locked:
+            return
         self.temp_connection_start = start_point
         self.temp_line = BetterConnectionLine(start_point, start_point, canvas=self, temp=True)
         self.scene.addItem(self.temp_line)
@@ -958,6 +979,10 @@ class EnhancedFlowCanvas(QGraphicsView):
                 self._pan_moved = False
                 event.accept()
                 return
+        if self._locked:
+            self.cancel_temp_connection()
+            super().mouseReleaseEvent(event)
+            return
         if self.temp_connection_start and self.temp_line:
             scene_pos = self.mapToScene(event.pos())
             items = self.scene.items(scene_pos)
@@ -979,12 +1004,17 @@ class EnhancedFlowCanvas(QGraphicsView):
             self._pan_moved = False
             event.accept()
             return
+        if self._locked and event.button() == Qt.MouseButton.LeftButton:
+            event.accept(); return  # 锁定时左键不触发选择/拖动
         super().mousePressEvent(event)
 
     def finalize_temp_connection(self, end_point):
         if not self.temp_connection_start or not self.temp_line:
             return
         if end_point.parent_item == self.temp_connection_start.parent_item:
+            self.cancel_temp_connection()
+            return
+        if self._locked:
             self.cancel_temp_connection()
             return
         self.temp_line.setEndPoint(end_point)
@@ -1174,12 +1204,16 @@ class EnhancedFlowCanvas(QGraphicsView):
 
     # ---------- 剪贴板与历史 ----------
     def copy_selection(self):
+        if self._locked:
+            return
         sel = [it for it in self.scene.selectedItems() if isinstance(it, ModuleItem)]
         self._clipboard = []
         for m in sel:
             self._clipboard.append({'module_type': m.module_type,'x': m.scenePos().x(),'y': m.scenePos().y()})
 
     def paste_selection(self):
+        if self._locked:
+            return
         if not self._clipboard:
             return
         for m in self._clipboard:
@@ -1187,6 +1221,8 @@ class EnhancedFlowCanvas(QGraphicsView):
         self._record_history()
 
     def duplicate_selection(self):
+        if self._locked:
+            return
         """复制并立即粘贴选中模块，偏移更小便于连续操作"""
         sel = [it for it in self.scene.selectedItems() if isinstance(it, ModuleItem)]
         if not sel:
@@ -1199,6 +1235,8 @@ class EnhancedFlowCanvas(QGraphicsView):
         self._record_history()
 
     def delete_selection(self):
+        if self._locked:
+            return
         removed = False
         for it in self.scene.selectedItems():
             if isinstance(it, ModuleItem):
@@ -1218,11 +1256,15 @@ class EnhancedFlowCanvas(QGraphicsView):
         self._history_index = len(self._history)-1
 
     def undo(self):
+        if self._locked:
+            return
         if self._history_index > 0:
             self._history_index -= 1
             self._restore_snapshot(self._history[self._history_index])
 
     def redo(self):
+        if self._locked:
+            return
         if self._history_index + 1 < len(self._history):
             self._history_index += 1
             self._restore_snapshot(self._history[self._history_index])
@@ -1290,6 +1332,15 @@ class EnhancedFlowCanvas(QGraphicsView):
         except Exception as e:
             print(f"保存流程失败: {e}")
             return False
+
+    def set_locked(self, locked: bool):
+        """外部设置锁定状态。锁定后禁止修改结构，仍允许查看与缩放。"""
+        self._locked = bool(locked)
+        # 视图交互：保持选择可见性但禁止拖动
+        for m in self.modules:
+            m.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, not self._locked)
+        self.setDragMode(QGraphicsView.DragMode.NoDrag if self._locked else QGraphicsView.DragMode.RubberBandDrag)
+        self.viewport().setCursor(Qt.CursorShape.ForbiddenCursor if self._locked else Qt.CursorShape.ArrowCursor)
 
     def load_from_file(self, path: str) -> bool:
         if not os.path.exists(path):

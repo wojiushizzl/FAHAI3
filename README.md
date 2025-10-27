@@ -260,6 +260,74 @@ GUI 属性面板会优先尝试读取模块的 `ConfigModel.__fields__`，为每
 
 若需更多示例或希望将上述功能拆分文档，请提出需求。
 
+## 开发者：创建自定义模块示例 (SampleDevModule)
+
+新增示例文件 `app/pipeline/custom/sample_dev_module.py`，演示最简可配置的自定义模块开发流程。该模块显示名为“示例模块”，在工具箱/右键菜单中出现，便于复制扩展。
+
+示例结构：
+```python
+class SampleDevModule(BaseModule):
+  CAPABILITIES = ModuleCapabilities(resource_tags=["cpu"], throughput_hint=200.0)
+  def _define_ports(self):
+    self.register_input_port("value", port_type="number", desc="输入数值", required=True)
+    self.register_input_port("flag", port_type="bool", desc="开关标志")
+    self.register_output_port("result", port_type="number", desc="计算结果")
+    self.register_output_port("echo", port_type="any", desc="回显原始输入")
+  def process(self, inputs):
+    base = float(inputs.get("value", 0)) if isinstance(inputs.get("value"),(int,float,str)) else 0.0
+    flag = inputs.get("flag", True)
+    multiplier = self.config.get("multiplier", 1.0)
+    enabled = self.config.get("enabled", True)
+    if not enabled: return {"result": 0, "echo": inputs}
+    return {"result": (base * multiplier) if flag else base, "echo": inputs}
+```
+
+配置模型 (Pydantic)：
+```python
+class SampleConfig(BaseModel):
+  multiplier: float = Field(1.0, description="乘法因子")
+  enabled: bool = Field(True, description="是否启用")
+  note: str | None = Field(None, description="备注")
+```
+模块 `configure({...})` 会自动校验并写入 `self.config`。GUI 属性面板会根据字段类型生成合适的编辑控件。
+
+### 创建你自己的模块步骤 (快速参考)
+1. 在 `app/pipeline/custom/` 下新建 `<your_module>_module.py`，继承 `BaseModule`。
+2. 在 `_define_ports()` 中注册输入/输出端口（避免仅使用默认 in/out，利于语义清晰）。
+3. 可选：定义 `ConfigModel`；在 `_initialize()` 中实例化或在首次 `configure()` 时构建。
+4. 在 `process(inputs)` 中读取 `inputs` 并返回 dict 输出（未返回 dict 时框架会包装为 `{"out": value}`）。
+5. 在文件尾部调用 `register_module("显示名", YourModuleClass)` 或在 `module_registry.py` 中添加集中注册块。
+6. 重启应用或触发热加载（未来将支持开发时热重载）。
+
+### 命名与显示名建议
+- 文件名使用功能短语 + `_module.py`（如 `resize_module.py`）。
+- 显示名（register_module 第一个参数）可使用中文，需保持唯一。
+- 端口名尽量短小：`image`, `mask`, `count`, `flag`，避免包含空格。
+
+### 端口类型与调度
+`port_type` 当前主要用于 UI 标记与未来类型匹配校验，可自定义：`number`, `image`, `string`, `bool`, `any`。保持简单的一致性有助于后续做自动连线建议。
+
+### 错误与调试
+- 在 `process` 中捕获异常并追加到 `self.errors` (可在属性面板展示)。
+- 使用 `self.logger.info()/warning()/error()` 输出到统一日志；可在后续添加日志视图 Dock。
+- 返回结果时若结构不符合期望，下游模块不会收到对应端口数据，可在执行器调试时打印上下文。
+
+### 高级扩展 (可选)
+- 支持批量：定义端口类型 `list[image]` 并在 `process` 中迭代。
+- 异步采集：在模块内启动线程写入 `self.outputs` 并在 `run_cycle` 返回已有缓存。
+- 资源标记：`CAPABILITIES = ModuleCapabilities(resource_tags=["gpu"], may_block=True)` 为后续调度优化做准备。
+
+### 发布为外部插件
+在你的包 `pyproject.toml` 中添加：
+```toml
+[project.entry-points."fahai.modules"]
+示例扩展模块 = "your_pkg.sample_module:SampleModule"
+```
+安装后启动应用即自动加载。
+
+---
+如需更详细的教程（端口类型规范、属性面板控件映射、热重载机制）请提出需求。示例模块是后续文档的基础模板，建议先复制再替换端口与处理逻辑。
+
 ## 目录结构更新（模块分类）
 
 已将原先平铺在 `app/pipeline/` 下的模块按功能分类迁移：

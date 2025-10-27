@@ -231,7 +231,7 @@ QCheckBox::indicator:hover {
 QCheckBox::indicator:checked {
     background-color: #2196f3;
     border-color: #2196f3;
-    image: url(icons/check.svg);
+    image: url(resources/icon/check.svg);
 }
 
 /* 单选框样式 */
@@ -254,6 +254,8 @@ QRadioButton::indicator:hover {
 QRadioButton::indicator:checked {
     background-color: #2196f3;
     border-color: #2196f3;
+    /* 若需要可添加选中图标，与复选框保持一致 */
+    /* image: url(resources/icon/check.svg); */
 }
 
 /* 分组框样式 */

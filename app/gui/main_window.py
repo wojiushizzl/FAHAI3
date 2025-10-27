@@ -38,12 +38,26 @@ class MainWindow(QMainWindow):
         self._current_pipeline_path: str | None = None  # 当前项目文件路径（用于 Ctrl+S 直接保存）
         self._last_save_ts: float = 0.0  # 保存节流时间戳
         self._save_min_interval_ms: int = 500  # 最小间隔
-        # 最近项目记录文件 (放在当前工作目录，可根据需要迁移到用户家目录)
-        self._last_project_meta_path = os.path.join(os.getcwd(), "last_project.json")
-        # 视图状态文件 (画布缩放/中心/网格/主题)
-        self._view_state_path = os.path.join(os.getcwd(), 'last_view.json')
-        # 窗口状态文件（尺寸/位置/停靠布局）
-        self._window_state_path = os.path.join(os.getcwd(), 'last_window_state.bin')
+        # user_data 目录用于存放用户持久化数据（不纳入版本控制）
+        self._user_data_dir = os.path.join(os.getcwd(), 'user_data')
+        try:
+            os.makedirs(self._user_data_dir, exist_ok=True)
+        except Exception:
+            pass
+        # 定义持久化文件路径
+        self._last_project_meta_path = os.path.join(self._user_data_dir, "last_project.json")
+        self._view_state_path = os.path.join(self._user_data_dir, 'last_view.json')
+        self._window_state_path = os.path.join(self._user_data_dir, 'last_window_state.bin')
+        # 迁移旧版根目录文件（兼容之前版本）
+        self._migrate_legacy_state_files()
+        # 用户项目存放目录 (pipeline json)
+        self._projects_dir = os.path.join(self._user_data_dir, 'projects')
+        try:
+            os.makedirs(self._projects_dir, exist_ok=True)
+        except Exception:
+            pass
+        # 编辑相关动作集合（用于锁定时禁用）在菜单初始化时填充
+        self._edit_related_actions: list[QAction] = []
 
         # 初始化UI组件 & 菜单/工具栏/状态栏
         self._init_ui()
@@ -147,6 +161,10 @@ class MainWindow(QMainWindow):
         save_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Save))
         save_action.triggered.connect(self._save_project)
         file_menu.addAction(save_action)
+        save_as_action = QAction('另存为(&A)', self)
+        save_as_action.setShortcut(QKeySequence('Ctrl+Shift+S'))
+        save_as_action.triggered.connect(self._save_project_as)
+        file_menu.addAction(save_as_action)
         load_action = QAction('加载流程(&L)', self)
         load_action.setShortcut(QKeySequence('Ctrl+Shift+O'))
         load_action.triggered.connect(self._open_project)
@@ -183,6 +201,10 @@ class MainWindow(QMainWindow):
         # 视图菜单
         view_menu = menubar.addMenu('视图(&V)')
         theme_toggle_action = QAction('黑白反转主题', self); theme_toggle_action.setCheckable(True); theme_toggle_action.setChecked(False); theme_toggle_action.triggered.connect(lambda checked: self._toggle_invert_theme(checked)); view_menu.addAction(theme_toggle_action)
+        # 收集需要在锁定时禁用的动作（编辑类）
+        self._edit_related_actions.extend([
+            undo_action, redo_action, copy_action, paste_action, delete_action, duplicate_action,
+        ])
 
     def _init_toolbar(self):
         """初始化工具栏"""
@@ -198,6 +220,25 @@ class MainWindow(QMainWindow):
         inject_act = QAction('注入数据', self); inject_act.triggered.connect(self._inject_data)
         edit_act = QAction('编辑模块', self); edit_act.triggered.connect(self._edit_selected_module)
         toolbar.addActions([run_act, pause_act, resume_act, stop_act, run_once_act, inject_act, edit_act])
+        # 画布锁定切换：锁定后禁止任何编辑（添加/删除/拖动/连线），仍可运行流程。
+        self._lock_act = QAction('锁定画布', self)
+        self._lock_act.setCheckable(True)
+        self._lock_act.setToolTip('锁定后禁止编辑，只能查看和运行')
+        def _toggle_lock(checked: bool):
+            if hasattr(self, 'flow_canvas'):
+                self.flow_canvas.set_locked(checked)
+            for act in getattr(self, '_edit_related_actions', []):
+                act.setEnabled(not checked)
+            if hasattr(self, 'dock_panel'):
+                self.dock_panel.setEnabled(not checked)
+            if hasattr(self, 'property_panel'):
+                self.property_panel.setEnabled(not checked)
+            if hasattr(self, 'statusbar'):
+                self.statusbar.showMessage('画布已锁定' if checked else '画布已解锁')
+        self._lock_act.toggled.connect(_toggle_lock)
+        toolbar.addAction(self._lock_act)
+        # 工具栏中的编辑相关动作加入集合
+        self._edit_related_actions.extend([inject_act, edit_act])
         
     def _init_statusbar(self):
         """初始化状态栏"""
@@ -299,7 +340,8 @@ class MainWindow(QMainWindow):
         
     def _open_project(self):
         """加载流程文件"""
-        path, _ = QFileDialog.getOpenFileName(self, '加载流程', '', 'Pipeline (*.json);;All (*)')
+        start_dir = self._projects_dir if os.path.isdir(self._projects_dir) else os.getcwd()
+        path, _ = QFileDialog.getOpenFileName(self, '加载流程', start_dir, 'Pipeline (*.json);;All (*)')
         if not path:
             return
         ok = self.flow_canvas.load_from_file(path)
@@ -336,11 +378,12 @@ class MainWindow(QMainWindow):
     def _save_project_as(self):
         # 为首次保存提供一个默认建议文件名而不是 sample.json
         import time as _time
-        if self._current_pipeline_path:
+        base_dir = self._projects_dir if os.path.isdir(self._projects_dir) else os.getcwd()
+        if self._current_pipeline_path and os.path.isfile(self._current_pipeline_path):
             suggested = self._current_pipeline_path
         else:
             ts = _time.strftime('%Y%m%d_%H%M%S')
-            suggested = os.path.join(os.getcwd(), f'pipeline_{ts}.json')
+            suggested = os.path.join(base_dir, f'pipeline_{ts}.json')
         path, _ = QFileDialog.getSaveFileName(self, '另存为流程', suggested, 'Pipeline (*.json);;All (*)')
         if not path:
             return
@@ -553,6 +596,26 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"关闭时保存视图状态失败: {e}")
         event.accept()
+
+    def _migrate_legacy_state_files(self):
+        """将旧版本根目录下的状态文件移动到 user_data 目录"""
+        legacy_files = [
+            ('last_project.json', self._last_project_meta_path),
+            ('last_view.json', self._view_state_path),
+            ('last_window_state.bin', self._window_state_path)
+        ]
+        for fname, new_path in legacy_files:
+            old_path = os.path.join(os.getcwd(), fname)
+            try:
+                if os.path.isfile(old_path) and not os.path.isfile(new_path):
+                    # 尝试迁移
+                    with open(old_path, 'rb') as rf:
+                        data = rf.read()
+                    with open(new_path, 'wb') as wf:
+                        wf.write(data)
+                    os.remove(old_path)
+            except Exception as e:
+                print(f"迁移文件 {fname} 失败: {e}")
 
     def showEvent(self, event):
         super().showEvent(event)
