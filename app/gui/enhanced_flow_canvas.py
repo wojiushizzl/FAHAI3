@@ -9,7 +9,7 @@
 """
 from PyQt6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsItem,
                              QGraphicsRectItem, QGraphicsTextItem, QMenu, QToolTip)
-from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer, QTime
 from PyQt6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QAction
 from typing import Dict, Any, List
 import json, os
@@ -17,6 +17,8 @@ import json, os
 from app.gui.connection_graphics import BetterConnectionLine
 from app.pipeline.module_registry import get_module_class
 from app.pipeline.pipeline_executor import PipelineExecutor
+
+DEBUG_GUI = False  # 全局调试开关: 设为 True 可恢复 [DEBUG] 打印
 
 class ModuleItem(QGraphicsRectItem):
     """模块项，支持动态端口反射"""
@@ -57,14 +59,37 @@ class ModuleItem(QGraphicsRectItem):
             self._thumb_item = QGraphicsPixmapItem(self)
             self._thumb_item.setPos(8, 24)
 
-        # 文本展示支持（打印显示模块）
-        self._is_text_viewer = (module_type == "打印显示")
+        # 文本查看分类拆分：
+        # _is_text_viewer 仅用于可编辑的打印显示系列；_is_text_display 用于参考 OK/NOK 的只读文本展示
+        self._is_text_viewer = (module_type in ("打印显示", "打印显示模块"))
+        self._is_text_display = (module_type == "文本展示")
         self._text_item = None
+        self._text_edit_widget = None
+        self._text_display_rect = None
         if self._is_text_viewer:
-            self._text_item = QGraphicsTextItem("", self)
-            self._text_item.setFont(QFont("Consolas", 9))
-            self._text_item.setDefaultTextColor(QColor(30, 30, 30))
-            self._text_item.setPos(8, 24)
+            from PyQt6.QtWidgets import QPlainTextEdit, QGraphicsProxyWidget
+            self._text_edit_widget = QPlainTextEdit()
+            self._text_edit_widget.setReadOnly(False)
+            self._text_edit_widget.setPlaceholderText("(无内容)")
+            self._text_edit_widget.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+            self._text_edit_widget.setStyleSheet("QPlainTextEdit {background:#fafafa;border:1px solid #bbb;font-family:Consolas;font-size:11px;color:#222;} ::selection {background:#cceeff;}")
+            proxy = QGraphicsProxyWidget(self); proxy.setWidget(self._text_edit_widget); proxy.setPos(8,24); self._text_proxy = proxy
+            def _on_user_change():
+                if self.module_ref and hasattr(self.module_ref,'_lines'):
+                    txt = self._text_edit_widget.toPlainText()
+                    self.module_ref._lines = txt.splitlines()[-int(self.module_ref.config.get('max_lines',10)):] or []
+                    self.module_ref._last_text = self.module_ref._lines[-1] if self.module_ref._lines else None
+            self._text_edit_widget.textChanged.connect(_on_user_change)
+            self._auto_scroll = True
+        elif self._is_text_display:
+            # 使用内部矩形 + QGraphicsTextItem 展示，只读无编辑
+            from PyQt6.QtWidgets import QGraphicsRectItem
+            self._text_display_rect = QGraphicsRectItem(self)
+            self._text_display_rect.setBrush(QBrush(QColor(255,255,255)))
+            self._text_display_rect.setPen(QPen(QColor(170,170,170),1))
+            self._text_item = QGraphicsTextItem("(无内容)", self._text_display_rect)
+            self._text_item.setFont(QFont("Consolas", 11))
+            self._text_item.setDefaultTextColor(QColor(34,34,34))
         # OK/NOK 状态模块
         self._is_oknok_viewer = (module_type == "OK/NOK展示")
         self._oknok_rect = None
@@ -168,6 +193,23 @@ class ModuleItem(QGraphicsRectItem):
             self._thumb_item.setPos(8, self._content_offset)
         if getattr(self, '_text_item', None):
             self._text_item.setPos(8, self._content_offset)
+        # 打印显示编辑组件随尺寸/端口变化重新定位与尺寸调整
+        if getattr(self, '_text_edit_widget', None):
+            try:
+                proxy = getattr(self, '_text_proxy', None)
+                content_top = self._content_offset
+                # 内容可用高度: 总高度 - 内容偏移 - 底部内边距
+                avail_h = max(40, int(self.rect().height() - content_top - 8))
+                avail_w = max(60, int(self.rect().width() - 16))
+                if proxy:
+                    proxy.setPos(8, content_top)
+                # 同步 QPlainTextEdit 尺寸
+                self._text_edit_widget.setMinimumWidth(avail_w)
+                self._text_edit_widget.setMaximumWidth(avail_w)
+                self._text_edit_widget.setMinimumHeight(avail_h)
+                self._text_edit_widget.setMaximumHeight(avail_h)
+            except Exception:
+                pass
         # 初始创建后立即居中标题
         if hasattr(self, '_center_title'):
             self._center_title()
@@ -216,36 +258,75 @@ class ModuleItem(QGraphicsRectItem):
             if prev_has_img is None or prev_has_img != has_img_now:
                 try:
                     if not has_img_now:
-                        print(f"[DEBUG][{self.module_id}] refresh_visual: 无图像")
+                        if DEBUG_GUI:
+                            print(f"[DEBUG][{self.module_id}] refresh_visual: 无图像")
                     else:
-                        print(f"[DEBUG][{self.module_id}] refresh_visual: shape={getattr(img,'shape',None)} dtype={getattr(img,'dtype',None)}")
+                        if DEBUG_GUI:
+                            print(f"[DEBUG][{self.module_id}] refresh_visual: shape={getattr(img,'shape',None)} dtype={getattr(img,'dtype',None)}")
                 except Exception as e:
-                    print(f"[DEBUG][{self.module_id}] refresh_visual: 打印异常: {e}")
+                    if DEBUG_GUI:
+                        print(f"[DEBUG][{self.module_id}] refresh_visual: 打印异常: {e}")
                 self._prev_has_img = has_img_now
             self._update_thumbnail(img)
         # ----- 文本展示处理 -----
-        if self._is_text_viewer and self._text_item:
+        if self._is_text_viewer and self._text_edit_widget:
             try:
                 text = getattr(self.module_ref, 'display_text', '') or ''
             except Exception:
                 text = ''
+            # 打印显示模块不涉及样式颜色配置
             prev_text = getattr(self, '_prev_text_content', None)
             if prev_text != text:
                 self._prev_text_content = text
                 display = text if text.strip() else "(无内容)"
+                # 若用户正在编辑，不强制覆盖其修改：仅当当前内容与模块缓冲不同或我们是首次建立
+                widget_txt = self._text_edit_widget.toPlainText()
+                if widget_txt.strip() != display.strip():
+                    self._text_edit_widget.blockSignals(True)
+                    self._text_edit_widget.setPlainText(display)
+                    self._text_edit_widget.blockSignals(False)
+                    # 自动滚动：仅在内容更新时而且未手动上滚
+                    if getattr(self, '_auto_scroll', True):
+                        scrollbar = self._text_edit_widget.verticalScrollBar()
+                        scrollbar.setValue(scrollbar.maximum())
+                # 统一使用内容偏移计算编辑区域与整体高度，避免文本区域超出模块矩形
+                self._update_text_widget_geometry(display)
+            else:
+                # 即使文本未变化，仍确保几何同步（用户 resize 后）
+                self._update_text_widget_geometry(self._prev_text_content or '')
+        elif self._is_text_display and self._text_display_rect and self._text_item and self.module_ref:
+            # 文本展示：固定矩形，不随行数膨胀，内部居中文本
+            try:
+                cfg = getattr(self.module_ref, 'config', {})
+                font_size = int(cfg.get('font_size', 12))
+                text_color = cfg.get('text_color', '#222222')
+                bg_color = cfg.get('background_color', '#ffffff')
+                self._text_item.setFont(QFont('Consolas', max(6,min(font_size,72))))
+                self._text_item.setDefaultTextColor(QColor(text_color))
+                self._text_display_rect.setBrush(QBrush(QColor(bg_color)))
+            except Exception:
+                pass
+            text = ''
+            try:
+                text = getattr(self.module_ref,'display_text','') or ''
+            except Exception:
+                pass
+            display = text if text.strip() else "(无内容)"
+            if getattr(self, '_prev_text_display', None) != display:
+                self._prev_text_display = display
                 self._text_item.setPlainText(display)
-                # 设定文本宽度为内容区宽度
-                content_width = max(20, self.rect().width() - 16)
-                self._text_item.setTextWidth(content_width)
-                try:
-                    doc_height = self._text_item.document().size().height()
-                except Exception:
-                    doc_height = 0
-                # 内容区所需高度 = doc_height + 内边距
-                needed_h = self._content_offset + doc_height + 12
-                if needed_h > self.rect().height():
-                    self.setRect(0, 0, self.rect().width(), needed_h)
-                    self._relayout_ports()
+            content_offset = getattr(self, '_content_offset', 40)
+            inner_w = max(60, self.rect().width() - 16)
+            inner_h = max(34, self.rect().height() - content_offset - 8)
+            self._text_display_rect.setRect(8, content_offset, inner_w, inner_h)
+            # 居中文本
+            try:
+                b = self._text_item.boundingRect()
+                tx = 8 + (inner_w - b.width())/2
+                ty = content_offset + (inner_h - b.height())/2
+                self._text_item.setPos(tx, ty)
+            except Exception:
+                pass
         # ----- OK/NOK 状态展示 -----
         if self._is_oknok_viewer and self._oknok_rect and self.module_ref:
             try:
@@ -313,7 +394,8 @@ class ModuleItem(QGraphicsRectItem):
             pix_scaled = pix.scaled(w, h, _Qt.AspectRatioMode.KeepAspectRatio, _Qt.TransformationMode.SmoothTransformation)
             self._thumb_item.setPixmap(pix_scaled)
         except Exception as e:
-            print(f"[DEBUG][{self.module_id}] _update_thumbnail 异常: {e}")
+            if DEBUG_GUI:
+                print(f"[DEBUG][{self.module_id}] _update_thumbnail 异常: {e}")
             placeholder = QImage(w, h, QImage.Format.Format_RGB32)
             placeholder.fill(QColor(200, 200, 200))
             self._thumb_item.setPixmap(QPixmap.fromImage(placeholder))
@@ -377,7 +459,19 @@ class ModuleItem(QGraphicsRectItem):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            # 若点击在输出端口矩形区域附近，优先保持连接拖拽，不触发 resize
+            # 解决: 同时命中右边缘与输出点导致 _resizing 与 temp_line 并存的崩溃
             pos = event.pos(); w = self.rect().width(); h = self.rect().height()
+            # 检查是否命中任一输出端口 (使用局部坐标比较)
+            hit_output_point = False
+            for p in self.output_points:
+                try:
+                    pr = p.mapRectToParent(p.rect())
+                    if pr.contains(pos):
+                        hit_output_point = True
+                        break
+                except Exception:
+                    pass
             corner_hit = False
             if self._corner_handle:
                 ch = QRectF(
@@ -387,11 +481,20 @@ class ModuleItem(QGraphicsRectItem):
                     self._corner_handle_size
                 )
                 corner_hit = ch.contains(pos)
-            if corner_hit or (abs(pos.x()-w) <= self._resize_margin) or (abs(pos.y()-h) <= self._resize_margin):
+            resize_zone = corner_hit or (abs(pos.x()-w) <= self._resize_margin) or (abs(pos.y()-h) <= self._resize_margin)
+            if resize_zone and not hit_output_point:
+                # 开始 resize 前取消可能存在的从本模块发起的临时连接
+                if self.canvas and getattr(self.canvas, 'temp_connection_start', None):
+                    if getattr(self.canvas.temp_connection_start, 'parent_item', None) is self:
+                        try:
+                            self.canvas.cancel_temp_connection()
+                        except Exception:
+                            pass
                 self._resizing = True
                 self._orig_size = (w, h)
                 self._press_pos = pos
-                print(f"[DEBUG][{self.module_id}] 开始调整尺寸 orig=({w},{h}) @({pos.x()},{pos.y()})")
+                if DEBUG_GUI:
+                    print(f"[DEBUG][{self.module_id}] 开始调整尺寸 orig=({w},{h}) @({pos.x()},{pos.y()})")
                 event.accept(); return
         super().mousePressEvent(event)
 
@@ -408,7 +511,8 @@ class ModuleItem(QGraphicsRectItem):
             if self._corner_handle:
                 self._corner_handle.setRect(new_w - self._corner_handle_size, new_h - self._corner_handle_size,
                                             self._corner_handle_size, self._corner_handle_size)
-            print(f"[DEBUG][{self.module_id}] 调整中 new=({new_w},{new_h})")
+            if DEBUG_GUI:
+                print(f"[DEBUG][{self.module_id}] 调整中 new=({new_w},{new_h})")
             event.accept(); return
         super().mouseMoveEvent(event)
 
@@ -422,7 +526,8 @@ class ModuleItem(QGraphicsRectItem):
             self.refresh_visual()
             if hasattr(self, '_center_title'):
                 self._center_title()
-            print(f"[DEBUG][{self.module_id}] 尺寸调整完成 ({new_w},{new_h})")
+            if DEBUG_GUI:
+                print(f"[DEBUG][{self.module_id}] 尺寸调整完成 ({new_w},{new_h})")
             event.accept(); return
         super().mouseReleaseEvent(event)
 
@@ -573,8 +678,50 @@ class ModuleItem(QGraphicsRectItem):
                 painter.setFont(f)
                 painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, label_text)
         painter.restore()
-        # 让子项 (文本/端口) 正常绘制
-        super().paint(painter, option, widget)
+
+    def _update_text_widget_geometry(self, display: str):
+        """根据当前文本计算合适的编辑区域与模块整体高度，确保文本框不大于内容矩形并填满可用空间。
+        规则:
+        - 行数 * 行高 + 内边距 得到建议编辑区高度。
+        - 模块总高度 = 内容偏移 + 编辑区高度 + 底部边距。
+        - 行高固定 14，顶部留 4px，底部留 8px，最大高度限制 500。
+        - 用户手动拖拽放大后不自动收缩到比拖拽更小（除非文本显著变短且多余空间超过阈值）。
+        """
+        if not (self._is_text_viewer and self._text_edit_widget):
+            return
+        try:
+            lines = max(1, display.count('\n') + 1)
+            line_h = 14
+            desired_edit_h = min(480, 8 + lines * line_h + 4)  # 内部高度（不含标题与端口区）
+            content_offset = getattr(self, '_content_offset', 40)
+            # 当前模块高度
+            current_total_h = self.rect().height()
+            min_total_h = content_offset + 40 + 8  # 最小编辑区 40
+            desired_total_h = content_offset + desired_edit_h + 8
+            # 若当前高度不足则扩展；若高度大出 120 且文本行很少则收缩
+            target_h = current_total_h
+            if current_total_h < desired_total_h:
+                target_h = desired_total_h
+            elif current_total_h > desired_total_h + 120:
+                # 收缩上限：不能低于最小高度
+                target_h = max(min_total_h, desired_total_h)
+            if target_h != current_total_h:
+                self.setRect(0,0,self.rect().width(), target_h)
+                if self.canvas:
+                    self.canvas._ensure_scene_margin()
+            # 计算编辑区尺寸（宽度 = 模块宽-16，高度 = 模块高 - content_offset - 底部边距）
+            edit_w = max(60, int(self.rect().width() - 16))
+            edit_h = max(40, int(self.rect().height() - content_offset - 8))
+            self._text_edit_widget.setFixedWidth(edit_w)
+            self._text_edit_widget.setFixedHeight(edit_h)
+            # 重新定位代理位置
+            if getattr(self, '_text_proxy', None):
+                try:
+                    self._text_proxy.setPos(8, content_offset)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[打印显示] 更新文本几何失败: {e}")
 
 class ConnectionPoint(QGraphicsRectItem):
     def __init__(self, parent_item, point_type, x, y, port_name, canvas=None, size=10):
@@ -654,8 +801,14 @@ class EnhancedFlowCanvas(QGraphicsView):
         self._pan_last_pos = None  # type: ignore
         self._pan_moved = False
         self._pan_threshold = 4  # 像素阈值：超过认为是拖拽，不弹菜单
+        self._suppress_next_context = False  # 右键平移结束后抑制一次菜单
+        # 右键平移增强：记录按下开始时间与累计距离，处理长按/慢拖也视为平移
+        self._pan_press_time = None  # ms 时间戳
+        self._pan_accum_dist = 0
+        self._pan_time_threshold = 180  # ms 超过认为是平移意图
+        self._pan_accum_threshold = 10  # 像素 累计超过认为是平移意图
         # 执行高亮原始样式缓存 {module_id: (brush, pen)}
-        self._exec_highlight_original: Dict[str, tuple] = {}
+        self._exec_highlight_original = {}
         # 图片展示模块定时器刷新（避免依赖结果回调）
         self._viewer_timer = QTimer(self)
         self._viewer_timer.setInterval(200)
@@ -821,7 +974,8 @@ class EnhancedFlowCanvas(QGraphicsView):
 
     # Context menu
     def contextMenuEvent(self, event):
-        if self._pan_moved:  # 刚拖拽过不弹菜单
+        if getattr(self, '_suppress_next_context', False):
+            self._suppress_next_context = False
             return
         if self._locked:
             return  # 锁定时不弹编辑菜单
@@ -955,6 +1109,8 @@ class EnhancedFlowCanvas(QGraphicsView):
             if delta.manhattanLength() > 0:
                 if delta.manhattanLength() >= self._pan_threshold:
                     self._pan_moved = True
+                # 累计距离（缓慢拖动仍视为平移）
+                self._pan_accum_dist += delta.manhattanLength()
                 hsb = self.horizontalScrollBar(); vsb = self.verticalScrollBar()
                 # 若滚动范围为零（缩放导致场景全在视口内），使用视图矩阵平移
                 if (hsb.maximum() - hsb.minimum()) == 0 and (vsb.maximum() - vsb.minimum()) == 0:
@@ -975,10 +1131,30 @@ class EnhancedFlowCanvas(QGraphicsView):
         if event.button() == Qt.MouseButton.RightButton and self._pan_active:
             self._pan_active = False
             self._pan_last_pos = None
+            # 计算按住时长
+            press_duration = 0
+            try:
+                if self._pan_press_time is not None:
+                    now_ms = int(QTime.currentTime().msecsSinceStartOfDay())
+                    press_duration = now_ms - self._pan_press_time
+            except Exception:
+                pass
+            should_suppress = False
             if self._pan_moved:
+                should_suppress = True
+            elif press_duration >= self._pan_time_threshold:
+                should_suppress = True
+            elif self._pan_accum_dist >= self._pan_accum_threshold:
+                should_suppress = True
+            if should_suppress:
                 self._pan_moved = False
-                event.accept()
-                return
+                self._suppress_next_context = True
+                self._pan_press_time = None
+                self._pan_accum_dist = 0
+                event.accept(); return
+            # 没有满足平移意图 -> 视为普通点击
+            self._pan_press_time = None
+            self._pan_accum_dist = 0
         if self._locked:
             self.cancel_temp_connection()
             super().mouseReleaseEvent(event)
@@ -1002,6 +1178,11 @@ class EnhancedFlowCanvas(QGraphicsView):
             self._pan_active = True
             self._pan_last_pos = event.pos()
             self._pan_moved = False
+            try:
+                self._pan_press_time = int(QTime.currentTime().msecsSinceStartOfDay())
+            except Exception:
+                self._pan_press_time = None
+            self._pan_accum_dist = 0
             event.accept()
             return
         if self._locked and event.button() == Qt.MouseButton.LeftButton:

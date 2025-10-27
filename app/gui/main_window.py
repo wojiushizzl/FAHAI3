@@ -198,9 +198,52 @@ class MainWindow(QMainWindow):
         reset_metrics_action = QAction('重置性能指标', self); reset_metrics_action.triggered.connect(self.reset_executor_metrics); monitor_menu.addAction(reset_metrics_action)
         toggle_sysinfo_action = QAction('系统信息轮询', self); toggle_sysinfo_action.setCheckable(True); toggle_sysinfo_action.setChecked(True); toggle_sysinfo_action.triggered.connect(self._toggle_system_info); monitor_menu.addAction(toggle_sysinfo_action)
         grid_toggle_action = QAction('切换网格显示', self); grid_toggle_action.triggered.connect(lambda: self.flow_canvas.toggle_grid()); monitor_menu.addAction(grid_toggle_action)
+        # 调试: 强制刷新所有模块视觉
+        refresh_view_act = QAction('刷新所有模块视觉', self)
+        def _do_refresh_all():
+            try:
+                for m in getattr(self.flow_canvas, 'modules', []):
+                    if hasattr(m, 'refresh_visual'):
+                        m.refresh_visual()
+                self.statusbar.showMessage('已刷新所有模块视觉', 3000)
+            except Exception as e:
+                self.statusbar.showMessage(f'刷新失败: {e}', 5000)
+        refresh_view_act.triggered.connect(_do_refresh_all)
+        monitor_menu.addAction(refresh_view_act)
         # 视图菜单
         view_menu = menubar.addMenu('视图(&V)')
         theme_toggle_action = QAction('黑白反转主题', self); theme_toggle_action.setCheckable(True); theme_toggle_action.setChecked(False); theme_toggle_action.triggered.connect(lambda checked: self._toggle_invert_theme(checked)); view_menu.addAction(theme_toggle_action)
+        # 属性面板显示切换
+        if hasattr(self, 'property_dock'):
+            toggle_prop_act = QAction('属性面板', self)
+            toggle_prop_act.setCheckable(True)
+            # 初始根据当前可见性
+            toggle_prop_act.setChecked(self.property_dock.isVisible())
+            def _sync_prop_vis(checked: bool):
+                try:
+                    if checked:
+                        self.property_dock.show()
+                        self.property_dock.raise_()
+                    else:
+                        self.property_dock.hide()
+                    if hasattr(self, 'statusbar'):
+                        self.statusbar.showMessage('属性面板已' + ('显示' if checked else '隐藏'), 2500)
+                except Exception as e:
+                    if hasattr(self, 'statusbar'):
+                        self.statusbar.showMessage(f'属性面板切换失败: {e}', 4000)
+            toggle_prop_act.toggled.connect(_sync_prop_vis)
+            # 当用户通过其它方式关闭 Dock 时保持菜单状态同步
+            def _on_dock_visibility_changed(vis: bool):
+                try:
+                    if toggle_prop_act.isChecked() != vis:
+                        toggle_prop_act.setChecked(vis)
+                except Exception:
+                    pass
+            try:
+                self.property_dock.visibilityChanged.connect(_on_dock_visibility_changed)
+            except Exception:
+                pass
+            view_menu.addAction(toggle_prop_act)
         # 收集需要在锁定时禁用的动作（编辑类）
         self._edit_related_actions.extend([
             undo_action, redo_action, copy_action, paste_action, delete_action, duplicate_action,

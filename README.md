@@ -208,6 +208,7 @@ GUI 属性面板会优先尝试读取模块的 `ConfigModel.__fields__`，为每
 6. 热加载优化：启动后延迟增量加载最近项目（批次加载模块并显示进度），降低初始卡顿。
 7. 流程结构新增 `groups`：格式为 `{group_id, title, x, y, width, height, members}`，兼容旧版本（无该字段时忽略）。
 8. YOLOv8 模型模块（检测/分类/分割）已集成，输出带注释图像与结构化结果，可与图片展示/保存模块串联。
+9. YOLOv8 过滤增强：支持 `target_classes` (名称或数字索引混合) 与 `enable_target_filter` 开关，只输出/标注指定目标；提供 `export_raw` 控制是否输出原始图端口；检测与分割模块新增 `annotate_filtered_only` 开关仅绘制过滤后目标（减少视觉噪声）。
 
 ### 2025-10-20
 1. 模块可调整大小（右下角拖拽或边缘）。
@@ -257,6 +258,67 @@ GUI 属性面板会优先尝试读取模块的 `ConfigModel.__fields__`，为每
 - YOLOv8 模型设备选择（显式 GPU/CPU 下拉）。
 - 增量保存（仅变更数据写入）。
 - 流程差异比较工具（JSON diff）。
+- YOLOv8 模块更多可视化选项（调色板、按类别隐藏标签等）。
+
+## YOLOv8 模块过滤与标注说明
+
+### 过滤字段
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| enable_target_filter | bool | 启用后根据 `target_classes` 仅保留匹配结果 |
+| target_classes | list[str] | 逗号分隔输入（UI），支持类别名称或数字索引混合，如 `person,0,car` |
+| export_raw | bool | 是否输出原始图像到 `image_raw` 端口 |
+| annotate_filtered_only | bool | (检测/分割) 标注图只绘制过滤后的结果子集 |
+
+数字索引与名称匹配逻辑：
+1. 预测前：若启用过滤，会将名称映射为内部 indices 传入 YOLO 以减少不必要目标。
+2. 预测后：再次根据名称/索引集合进行安全过滤，确保结果稳定。
+
+### 使用示例
+```
+enable_target_filter = true
+target_classes = person,car,2
+annotate_filtered_only = true
+export_raw = true
+confidence = 0.35
+```
+含义：预测只输出 person / car / 类别索引 2 的目标；标注图仅显示这些目标；仍同时提供原始图像端口用于对比与后续处理。
+
+### 分割模块特殊说明
+在 `annotate_filtered_only` 为 true 时，分割模块会同时裁剪 boxes 与 masks 子集再调用内部绘制函数，避免显示未保留的实例。若过滤结果为空则返回原图（不绘制任何标注）。
+
+### 性能提示
+预过滤（names -> indices）可降低后处理对象数量；标注仅绘制过滤子集减少绘制开销（特别是大量实例场景）。
+
+## 保存文本模块 (保存文本)
+
+`保存文本` 模块用于将流中的字符串写入文件，支持追加/覆盖与自动时间戳。
+
+配置字段：
+| 字段 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| file_path | str | outputs/text_log.txt | 目标文件路径（相对或绝对） |
+| append | bool | True | True 追加写入；False 覆盖写入 |
+| add_timestamp | bool | True | 每行前加 `[YYYY-MM-DD HH:MM:SS]` 时间戳 |
+| encoding | str | utf-8 | 文件写入编码 |
+| ensure_parent | bool | True | 不存在父目录时自动创建 |
+| empty_placeholder | str | (empty) | 输入为空字符串时的替代内容 |
+
+输出端口：
+| 端口 | 类型 | 内容 |
+|------|------|------|
+| status | meta | `ok:<count>` 或 `error:<reason>` |
+| saved_path | meta | 实际写入文件路径（失败时为 None） |
+
+示例：
+```
+file_path = logs/run1.txt
+append = true
+add_timestamp = true
+encoding = utf-8
+```
+串联方式：`模型/逻辑模块 -> 保存文本`，将上游的文本结果（例如检测统计、分类标签）持久化，便于后续分析。
+
 
 若需更多示例或希望将上述功能拆分文档，请提出需求。
 

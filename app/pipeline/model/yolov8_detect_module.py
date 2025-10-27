@@ -54,6 +54,10 @@ class YoloV8DetectModule(BaseModule):
         show_labels: bool = True
         show_conf: bool = True
         half: bool = False
+        export_raw: bool = True  # 是否输出原始图像（image_raw）
+        enable_target_filter: bool = False  # 是否只输出指定目标类别
+        target_classes: List[str] = []       # 目标类别名称(与模型 names 对应, 留空表示不过滤)
+        annotate_filtered_only: bool = False  # 标注图是否仅显示过滤后结果
 
         @validator("confidence")
         def _conf(cls, v):
@@ -78,11 +82,18 @@ class YoloV8DetectModule(BaseModule):
             "show_labels": True,
             "show_conf": True,
             "half": False,
+            "export_raw": True,
+            "enable_target_filter": False,
+            "target_classes": [],
+            "annotate_filtered_only": False,
         })
         self._model = None
         self._model_loaded = False
         self._names: Dict[int, str] = {}
         self._failed_reason: Optional[str] = None
+        # 最近一次推理的尺寸 (H,W,C)
+        self._last_raw_shape: Optional[tuple] = None
+        self._last_annotated_shape: Optional[tuple] = None
 
     @property
     def module_type(self) -> ModuleType:
@@ -92,6 +103,7 @@ class YoloV8DetectModule(BaseModule):
         if not self.input_ports:
             self.register_input_port("image", port_type="frame", desc="输入图像", required=True)
         if not self.output_ports:
+            self.register_output_port("image_raw", port_type="frame", desc="原始输入图像")
             self.register_output_port("image", port_type="frame", desc="标注后图像")
             self.register_output_port("results", port_type="meta", desc="检测结果列表")
             self.register_output_port("status", port_type="meta", desc="运行状态")
@@ -114,6 +126,12 @@ class YoloV8DetectModule(BaseModule):
         except Exception as e:
             self._failed_reason = f"未安装 ultralytics: {e}"
             return
+        # PyTorch 2.6 weights_only 兼容补丁
+        try:
+            from app.utils.torch_patch import ensure_torch_load_legacy
+            ensure_torch_load_legacy()
+        except Exception:
+            pass
         model_path = self.config.get("model_path", "yolov8n.pt")
         try:
             self._model = YOLO(model_path)
@@ -121,7 +139,12 @@ class YoloV8DetectModule(BaseModule):
             self._names = getattr(self._model, "names", {}) or {}
             self._model_loaded = True
         except Exception as e:
-            self._failed_reason = f"模型加载失败: {e}"
+            # 若报错与 weights_only 相关，提示可能的兼容问题
+            msg = str(e)
+            if "weights_only" in msg.lower():
+                self._failed_reason = f"模型加载失败(weights_only兼容): {msg}"
+            else:
+                self._failed_reason = f"模型加载失败: {msg}"
 
     def _on_stop(self):
         # 释放模型引用（便于显式 GC）
@@ -140,6 +163,11 @@ class YoloV8DetectModule(BaseModule):
             arr = np.stack([arr]*3, axis=-1)
         elif arr.shape[2] == 4:
             arr = arr[:, :, :3]
+        # 更新原始尺寸（使用原始传入图像的 shape）
+        try:
+            self._last_raw_shape = tuple(img.shape)
+        except Exception:
+            self._last_raw_shape = None
         # YOLO 输入通常为 BGR; 若后续需要可加颜色转换配置
         conf = float(self.config.get("confidence", 0.25))
         max_det = int(self.config.get("max_det", 100))
@@ -148,8 +176,29 @@ class YoloV8DetectModule(BaseModule):
         half = bool(self.config.get("half", False)) and device.startswith("cuda")
         try:
             # ultralytics YOLO 调用
-            results = self._model.predict(source=arr, conf=conf, verbose=False, max_det=max_det,
-                                           agnostic_nms=agnostic, device=device, half=half)
+            predict_kwargs: Dict[str, Any] = dict(source=arr, conf=conf, verbose=False, max_det=max_det,
+                                                 agnostic_nms=agnostic, device=device, half=half)
+            # 名称过滤映射：启用 enable_target_filter 时根据 target_classes 名称映射 indices（若提供）
+            if bool(self.config.get("enable_target_filter", False)):
+                tnames = self.config.get("target_classes", []) or []
+                if tnames and self._names:
+                    name_to_idx = {str(v).lower(): k for k, v in self._names.items()}
+                    mapped = []
+                    for nm in tnames:
+                        key = str(nm).strip().lower()
+                        # 支持数字索引 (字符串或整数)
+                        if key.isdigit():
+                            try:
+                                mapped.append(int(key))
+                                continue
+                            except ValueError:
+                                pass
+                        if key in name_to_idx:
+                            mapped.append(int(name_to_idx[key]))
+                    if mapped:
+                        predict_kwargs["classes"] = mapped
+                print(mapped)
+            results = self._model.predict(**predict_kwargs)
         except Exception as e:
             return {"status": f"infer-error: {e}"}
         if not results:
@@ -176,12 +225,92 @@ class YoloV8DetectModule(BaseModule):
                         })
         except Exception as e:
             return {"status": f"parse-error: {e}"}
+        # 目标过滤逻辑
+        if bool(self.config.get("enable_target_filter", False)):
+            target_list = self.config.get("target_classes", []) or []
+            norm_name_set = set()
+            index_set = set()
+            for t in target_list:
+                s = str(t).strip()
+                if not s:
+                    continue
+                if s.isdigit():
+                    try:
+                        index_set.add(int(s))
+                    except ValueError:
+                        pass
+                else:
+                    norm_name_set.add(s.lower())
+            if norm_name_set or index_set:
+                filtered = []
+                for d in detections:
+                    cid = d.get("class_id")
+                    cname = d.get("class_name", "").lower()
+                    if (cid in index_set) or (cname in norm_name_set):
+                        filtered.append(d)
+                detections = filtered
         # 可视化标注
+        annotated = arr
         try:
-            annotated = r0.plot(conf=self.config.get("show_conf", True), labels=self.config.get("show_labels", True))
+            if bool(self.config.get("annotate_filtered_only", False)) and bool(self.config.get("enable_target_filter", False)):
+                # 构造一个仿 results 的临时对象，替换 boxes 为过滤后的集合
+                # ultralytics Results 对象不可直接简单修改, 这里采用重新绘制策略:
+                from copy import deepcopy
+                # 若 detections 空则直接返回原图
+                if detections:
+                    # 创建 mask 图层: 依据 YOLO plot 实现，需要原始 r0.boxes 张量子集
+                    try:
+                        # 获取原 box/cls/conf 张量并根据 filtered indices 重组
+                        all_indices = []
+                        id_map = []
+                        if hasattr(r0, 'boxes') and r0.boxes is not None:
+                            xyxy = getattr(r0.boxes, 'xyxy', None)
+                            cls_tensor = getattr(r0.boxes, 'cls', None)
+                            conf_tensor = getattr(r0.boxes, 'conf', None)
+                            if xyxy is not None and cls_tensor is not None and conf_tensor is not None:
+                                # 通过匹配坐标近似确定索引 (简单策略：首个匹配)
+                                for d in detections:
+                                    bb = d['box']
+                                    # 在 xyxy 中寻找完全相同四元组
+                                    match_idx = None
+                                    for i in range(len(xyxy)):
+                                        arr_bb = xyxy[i].tolist()
+                                        arr_bb_r = [round(x,2) for x in arr_bb]
+                                        if arr_bb_r == bb:
+                                            match_idx = i
+                                            break
+                                    if match_idx is not None:
+                                        all_indices.append(match_idx)
+                        if all_indices:
+                            import torch
+                            # 构造子 boxes 对象
+                            sub_boxes = deepcopy(r0.boxes)
+                            sub_boxes.xyxy = r0.boxes.xyxy[all_indices]
+                            sub_boxes.cls = r0.boxes.cls[all_indices]
+                            sub_boxes.conf = r0.boxes.conf[all_indices]
+                            # 临时替换 plot 时使用的 boxes
+                            original_boxes = r0.boxes
+                            r0.boxes = sub_boxes
+                            try:
+                                annotated = r0.plot(conf=self.config.get("show_conf", True), labels=self.config.get("show_labels", True))
+                            finally:
+                                r0.boxes = original_boxes
+                        else:
+                            annotated = arr
+                    except Exception:
+                        annotated = r0.plot(conf=self.config.get("show_conf", True), labels=self.config.get("show_labels", True))
+                else:
+                    annotated = arr
+            else:
+                annotated = r0.plot(conf=self.config.get("show_conf", True), labels=self.config.get("show_labels", True))
         except Exception:
             annotated = arr
+        try:
+            self._last_annotated_shape = tuple(annotated.shape)
+        except Exception:
+            self._last_annotated_shape = None
         return {
+            "image_raw": img if bool(self.config.get("export_raw", True)) else None,
             "image": annotated,
             "results": detections,
             "status": f"ok:{len(detections)}"
@@ -193,5 +322,7 @@ class YoloV8DetectModule(BaseModule):
             "model_loaded": self._model_loaded,
             "failed_reason": self._failed_reason,
             "classes": list(self._names.values()),
+            "last_raw_shape": self._last_raw_shape,
+            "last_annotated_shape": self._last_annotated_shape,
         })
         return base

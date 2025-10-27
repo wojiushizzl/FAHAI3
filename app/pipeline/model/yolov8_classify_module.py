@@ -32,6 +32,7 @@ class YoloV8ClassifyModule(BaseModule):
         device: str = "auto"
         top_n: int = 5
         half: bool = False
+        export_raw: bool = True  # 是否输出原始图像端口
 
         @validator("top_n")
         def _tn(cls, v):
@@ -45,11 +46,14 @@ class YoloV8ClassifyModule(BaseModule):
             "device": "auto",
             "top_n": 5,
             "half": False,
+            "export_raw": True,
         })
         self._model = None
         self._model_loaded = False
         self._names: Dict[int, str] = {}
         self._failed_reason: Optional[str] = None
+        self._last_raw_shape: Optional[tuple] = None
+        self._last_annotated_shape: Optional[tuple] = None  # 分类不修改图像, 等同 raw
 
     @property
     def module_type(self) -> ModuleType:
@@ -59,7 +63,8 @@ class YoloV8ClassifyModule(BaseModule):
         if not self.input_ports:
             self.register_input_port("image", port_type="frame", desc="输入图像", required=True)
         if not self.output_ports:
-            self.register_output_port("image", port_type="frame", desc="原图输出")
+            self.register_output_port("image_raw", port_type="frame", desc="原始输入图像")
+            self.register_output_port("image", port_type="frame", desc="(分类)保持原图")
             self.register_output_port("results", port_type="meta", desc="分类结果")
             self.register_output_port("status", port_type="meta", desc="状态")
 
@@ -81,6 +86,12 @@ class YoloV8ClassifyModule(BaseModule):
         except Exception as e:
             self._failed_reason = f"未安装 ultralytics: {e}"
             return
+        # PyTorch 2.6 weights_only 兼容补丁
+        try:
+            from app.utils.torch_patch import ensure_torch_load_legacy
+            ensure_torch_load_legacy()
+        except Exception:
+            pass
         path = self.config.get("model_path", "yolov8n-cls.pt")
         try:
             self._model = YOLO(path)
@@ -88,7 +99,11 @@ class YoloV8ClassifyModule(BaseModule):
             self._names = getattr(self._model, "names", {}) or {}
             self._model_loaded = True
         except Exception as e:
-            self._failed_reason = f"模型加载失败: {e}"
+            msg = str(e)
+            if "weights_only" in msg.lower():
+                self._failed_reason = f"模型加载失败(weights_only兼容): {msg}"
+            else:
+                self._failed_reason = f"模型加载失败: {msg}"
 
     def _on_stop(self):
         self._model = None
@@ -105,6 +120,10 @@ class YoloV8ClassifyModule(BaseModule):
             arr = np.stack([arr]*3, axis=-1)
         elif arr.shape[2] == 4:
             arr = arr[:, :, :3]
+        try:
+            self._last_raw_shape = tuple(img.shape)
+        except Exception:
+            self._last_raw_shape = None
         device = self._select_device()
         half = bool(self.config.get("half", False)) and device.startswith("cuda")
         try:
@@ -132,8 +151,10 @@ class YoloV8ClassifyModule(BaseModule):
                         })
         except Exception as e:
             return {"status": f"parse-error: {e}"}
+        self._last_annotated_shape = self._last_raw_shape
         return {
-            "image": img,  # 不修改原图
+            "image_raw": img if bool(self.config.get("export_raw", True)) else None,
+            "image": img,
             "results": detections,
             "status": f"ok:{len(detections)}"
         }
@@ -144,5 +165,7 @@ class YoloV8ClassifyModule(BaseModule):
             "model_loaded": self._model_loaded,
             "failed_reason": self._failed_reason,
             "classes": list(self._names.values()),
+            "last_raw_shape": self._last_raw_shape,
+            "last_annotated_shape": self._last_annotated_shape,
         })
         return base

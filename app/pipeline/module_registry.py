@@ -139,12 +139,22 @@ try:
     register_module("保存图片", SaveImageModule)
 except Exception as e:
     pass
+try:
+    from .custom.save_text_module import SaveTextModule
+    register_module("保存文本", SaveTextModule)
+except Exception as e:
+    pass
 
 # 打印显示模块（文本实时显示）
 try:
     from .custom.print_display_module import PrintDisplayModule
     register_module("打印显示", PrintDisplayModule)
 except Exception as e:
+    pass
+try:
+    from .custom.text_display_module import TextDisplayModule
+    register_module("文本展示", TextDisplayModule)
+except Exception:
     pass
 
 # 路径选择器模块
