@@ -446,6 +446,10 @@ class PipelineExecutor:
                 node.last_result = result
                 self._route_outputs(node, result, data_context)
                 self._notify_module_step(node_id, 'end')
+                # 中断检测 (布尔闸门等设置 request_abort)
+                if getattr(node.module, 'request_abort', False) or (isinstance(result, dict) and result.get('abort') is True):
+                    self.logger.info(f"run_once: 中断于节点 {node_id}")
+                    break
             exec_time = time.time() - start_t
             self.execution_count += 1
             self.total_execution_time += exec_time
@@ -566,6 +570,9 @@ class PipelineExecutor:
                 node.last_result = result
                 self._route_outputs(node, result, current_data)
                 self._notify_module_step(node.node_id, 'end')
+                if getattr(node.module, 'request_abort', False) or (isinstance(result, dict) and result.get('abort') is True):
+                    self.logger.info(f"顺序执行中断于节点 {node_id}")
+                    break
             return current_data
         # 自适应层级并发
         levels = self._calculate_execution_levels()
@@ -602,6 +609,9 @@ class PipelineExecutor:
                     node.last_result = result
                     self._route_outputs(node, result, current_data)
                     self._notify_module_step(nid, 'end')
+                    if getattr(node.module, 'request_abort', False) or (isinstance(result, dict) and result.get('abort') is True):
+                        self.logger.info(f"自适应并发层中断于节点 {nid}")
+                        return current_data
             # 顺序执行普通节点
             for nid in normal_nodes:
                 node = self.nodes[nid]
@@ -615,6 +625,9 @@ class PipelineExecutor:
                 node.last_result = result
                 self._route_outputs(node, result, current_data)
                 self._notify_module_step(nid, 'end')
+                if getattr(node.module, 'request_abort', False) or (isinstance(result, dict) and result.get('abort') is True):
+                    self.logger.info(f"自适应并发普通层中断于节点 {nid}")
+                    return current_data
         return current_data
 
     def _execute_node_return_route(self, node: PipelineNode, current_data: Dict[str, Any]) -> None:

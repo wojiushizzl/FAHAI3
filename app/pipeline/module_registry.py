@@ -125,6 +125,11 @@ try:
 except Exception:
     pass
 try:
+    from .utility.bool_gate_module import BoolGateModule
+    register_module("布尔闸门", BoolGateModule)
+except Exception:
+    pass
+try:
     from .utility.path_selector_module import PathSelectorModule
     register_module("路径选择器", PathSelectorModule)
 except Exception:

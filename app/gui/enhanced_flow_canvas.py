@@ -593,40 +593,22 @@ class ModuleItem(QGraphicsRectItem):
         dark = False
         if hasattr(self, 'canvas') and hasattr(self.canvas, '_dark_theme'):
             dark = bool(getattr(self.canvas, '_dark_theme'))
-        # 按分类着色：与工具箱/右键菜单分类逻辑统一
-        name = self.module_type  # 显示名即分类判定依据
-        low = name.lower()
-        # 分类映射规则（复制自 contextMenuEvent / ModuleToolbox）
-        category = '其它'
+        # 统一分类 + 颜色工具
         try:
-            if ('路径' in name) or (name.startswith('相机')) or (name.startswith('触发')):
-                category = '输入'
-            elif ('模型' in name) or ('yolov8' in low) or ('model' in low):
-                category = '模型'
-            elif ('展示' in name) or ('显示' in name):
-                category = '显示'
-            elif ('保存' in name) or ('save' in low):
-                category = '存储'
-            elif 'modbus' in low:
-                category = '协议'
-            elif ('脚本' in name) or ('script' in low):
-                category = '脚本'
-            elif ('逻辑' in name) or ('延时' in name) or ('示例' in name) or ('文本输入' in name) or (name == '打印') or ('print' in low):
-                category = '逻辑'
+            from app.pipeline.utility.category_utils import classify_module, category_color_pair
+            from app.pipeline.base_module import ModuleType
+            # 尝试获取底层 module_type (BaseModule.module_type 为 Enum) 供更精准分类
+            module_type_enum = None
+            if self.module_ref is not None:
+                try:
+                    module_type_enum = getattr(self.module_ref, 'module_type', None)
+                except Exception:
+                    module_type_enum = None
+            category = classify_module(self.module_type, getattr(module_type_enum, 'value', None) and module_type_enum)
+            c1, c2 = category_color_pair(category, dark)
         except Exception:
             category = '其它'
-        category_color_pairs = {
-            '输入': (QColor(76,175,80), QColor(102,187,106)),          # 绿色系
-            '模型': (QColor(142,36,170), QColor(171,71,188)),           # 紫色系
-            '显示': (QColor(30,136,229), QColor(66,165,245)),           # 蓝色系
-            '存储': (QColor(109,76,65), QColor(141,110,99)),            # 棕色系
-            '协议': (QColor(251,140,0), QColor(255,167,38)),            # 橙色系
-            '脚本': (QColor(84,110,122), QColor(120,144,156)),          # 灰蓝系
-            '逻辑': (QColor(57,73,171), QColor(92,107,192)),            # 靛青系
-            '其它': (QColor(117,117,117), QColor(158,158,158)),         # 中性灰
-        }
-        base_pair = category_color_pairs.get(category, (QColor(95,125,170), QColor(120,155,195)))
-        c1, c2 = base_pair
+            c1, c2 = QColor(95,125,170), QColor(120,155,195)
         if dark:
             # 暗色下整体降低亮度并稍微提高饱和度
             def dim(col: QColor, f=0.55):

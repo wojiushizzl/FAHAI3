@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QMimeData
 from PyQt6.QtGui import QDrag, QPixmap, QIcon, QPainter, QShortcut, QKeySequence, QColor
 from app.pipeline.module_registry import list_registered_modules, get_module_class
 from app.pipeline.base_module import ModuleType
+from app.pipeline.utility.category_utils import classify_module
 
 
 class ModuleToolbox(QWidget):
@@ -59,28 +60,11 @@ class ModuleToolbox(QWidget):
         groups = {k: [] for k in ['输入', '模型', '显示', '存储', '协议', '脚本', '逻辑', '其它']}
 
         def classify(name: str, cls) -> str:
-            low = name.lower()
-            # 基础类型推断
             try:
-                mtype = cls(name=name).module_type if cls else ModuleType.CUSTOM
+                mtype = cls(name=name).module_type if cls else None
             except Exception:
-                mtype = ModuleType.CUSTOM
-            # 映射逻辑 (与 enhanced_flow_canvas.py 中保持相同顺序与条件)
-            if mtype in [ModuleType.CAMERA, ModuleType.TRIGGER] or ('路径' in name):
-                return '输入'
-            if mtype == ModuleType.MODEL or 'yolov8' in low or 'model' in low:
-                return '模型'
-            if ('展示' in name) or ('显示' in name):
-                return '显示'
-            if ('保存' in name) or ('save' in low):
-                return '存储'
-            if 'modbus' in low:
-                return '协议'
-            if '脚本' in name or 'script' in low:
-                return '脚本'
-            if ('逻辑' in name) or ('延时' in name) or ('示例' in name) or ('文本输入' in name) or (name == '打印') or ('print' in low):
-                return '逻辑'
-            return '其它'
+                mtype = None
+            return classify_module(name, mtype)
 
         for display in list_registered_modules():
             cls = get_module_class(display)
@@ -110,29 +94,12 @@ class ModuleToolbox(QWidget):
     def _make_icon(self, name: str, category: str | None = None) -> QIcon:
         """生成简易彩色方块图标。根据分类而非旧 ModuleType 上色。"""
         if category is None:
-            # 回退: 若未提供分类则尝试推断，与 refresh_modules 中逻辑保持一致
             cls = get_module_class(name)
             try:
-                module_type = cls(name=name).module_type if cls else ModuleType.CUSTOM
+                mtype = cls(name=name).module_type if cls else None
             except Exception:
-                module_type = ModuleType.CUSTOM
-            low = name.lower()
-            if module_type in [ModuleType.CAMERA, ModuleType.TRIGGER] or ('路径' in name):
-                category = '输入'
-            elif module_type == ModuleType.MODEL or 'yolov8' in low or 'model' in low:
-                category = '模型'
-            elif ('展示' in name) or ('显示' in name):
-                category = '显示'
-            elif ('保存' in name) or ('save' in low):
-                category = '存储'
-            elif 'modbus' in low:
-                category = '协议'
-            elif '脚本' in name or 'script' in low:
-                category = '脚本'
-            elif ('逻辑' in name) or ('延时' in name) or ('示例' in name) or ('文本输入' in name) or (name == '打印') or ('print' in low):
-                category = '逻辑'
-            else:
-                category = '其它'
+                mtype = None
+            category = classify_module(name, mtype)
         color_map = {
             '输入': '#4CAF50',
             '模型': '#9C27B0',
