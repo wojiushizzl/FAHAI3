@@ -1,4 +1,5 @@
 # Python bytecode and cache
+# .pyc / .pyo / optimized bytecode generated automatically at import time
 __pycache__/
 *.py[cod]
 *$py.class
