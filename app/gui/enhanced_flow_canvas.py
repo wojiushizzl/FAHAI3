@@ -1442,14 +1442,42 @@ class EnhancedFlowCanvas(QGraphicsView):
     def delete_selection(self):
         if self._locked:
             return
-        removed = False
-        for it in self.scene.selectedItems():
-            if isinstance(it, ModuleItem):
-                self.scene.removeItem(it)
-                if it in self.modules:
-                    self.modules.remove(it)
-                removed = True
-        if removed:
+        removed_any = False
+        # 支持仅删除连接线
+        try:
+            from app.gui.connection_graphics import BetterConnectionLine
+        except Exception:
+            BetterConnectionLine = None  # type: ignore
+        if BetterConnectionLine:
+            selected_lines = [it for it in self.scene.selectedItems() if isinstance(it, BetterConnectionLine)]
+            for line in list(selected_lines):
+                try:
+                    self._remove_connection(line)
+                    removed_any = True
+                except Exception:
+                    pass
+        # 删除模块
+        to_delete_modules = [it for it in self.scene.selectedItems() if isinstance(it, ModuleItem)]
+        for m in to_delete_modules:
+            # 断开关联连接
+            try:
+                for p in getattr(m, 'output_points', []):
+                    for line in list(getattr(p, 'connections', [])):
+                        self._remove_connection(line)
+                for p in getattr(m, 'input_points', []):
+                    for line in list(getattr(p, 'connections', [])):
+                        self._remove_connection(line)
+            except Exception:
+                pass
+        for m in to_delete_modules:
+            try:
+                if m in self.modules:
+                    self.modules.remove(m)
+                self.scene.removeItem(m)
+                removed_any = True
+            except Exception:
+                pass
+        if removed_any:
             self._cleanup_orphan_connections()
             self._record_history()
 

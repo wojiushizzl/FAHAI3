@@ -93,6 +93,7 @@ class YoloV8SegmentModule(BaseModule):
     def _define_ports(self):
         if not self.input_ports:
             self.register_input_port("image", port_type="frame", desc="输入图像", required=True)
+            self.register_input_port("control", port_type="bool", desc="推理控制: False 跳过", required=False)
         if not self.output_ports:
             self.register_output_port("image_raw", port_type="frame", desc="原始输入图像")
             self.register_output_port("image", port_type="frame", desc="标注后图像")
@@ -149,6 +150,19 @@ class YoloV8SegmentModule(BaseModule):
             pass
 
     def process(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        ctrl = inputs.get("control")
+        if ctrl is not None:
+            if isinstance(ctrl, (int, float)):
+                ctrl_val = (ctrl != 0)
+            elif isinstance(ctrl, str):
+                v = ctrl.strip().lower()
+                ctrl_val = v in {"true","1","yes","y","run","start"}
+                if v in {"false","0","no","n","stop","pause"}:
+                    ctrl_val = False
+            else:
+                ctrl_val = bool(ctrl)
+            if not ctrl_val:
+                return {"status": "skipped"}
         img = inputs.get("image")
         if img is None or not isinstance(img, np.ndarray):
             return {"status": "no-image"}

@@ -3,7 +3,7 @@
 """改进的连接线与交互支持
 包含 BetterConnectionLine 提供拖拽过程中光标跟随、箭头绘制与删除菜单。
 """
-from PyQt6.QtWidgets import QGraphicsItem
+from PyQt6.QtWidgets import QGraphicsItem, QGraphicsSceneContextMenuEvent
 from PyQt6.QtGui import QPen, QColor, QBrush, QPainter
 from PyQt6.QtCore import QPointF, QRectF, Qt
 
@@ -11,6 +11,10 @@ class BetterConnectionLine(QGraphicsItem):
     """改进连接线: 支持临时拖拽光标跟随、箭头、右键删除"""
     def __init__(self, start_point, end_point, canvas=None, temp=False):
         super().__init__()
+        # 允许被选择
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        # 启用鼠标悬停事件
+        self.setAcceptHoverEvents(True)
         self.start_point = start_point
         self.end_point = end_point
         self.canvas = canvas
@@ -82,13 +86,33 @@ class BetterConnectionLine(QGraphicsItem):
         end = self.end_point.scenePos() if (self.end_point and not self.temp) else (self.temp_cursor_pos or start)
         return QRectF(start, end).normalized()
 
+    def shape(self):
+        """精确命中区域: 使用细路径而非整个 boundingRect 避免矩形大面积难以选择
+
+        默认 boundingRect 过大导致点击空白处也可能命中, 这里构造一条较宽的 QPainterPath (6px) 贴合直线, 提高选择精准度。
+        """
+        start = self.start_point.scenePos()
+        end = self.end_point.scenePos() if (self.end_point and not self.temp) else (self.temp_cursor_pos or start)
+        from PyQt6.QtGui import QPainterPath, QPainterPathStroker
+        path = QPainterPath(start)
+        path.lineTo(end)
+        stroker = QPainterPathStroker()
+        stroker.setWidth(6.0)  # 可调命中宽度
+        return stroker.createStroke(path)
+
     def paint(self, painter: QPainter, option, widget):
         start = self.start_point.scenePos()
         if self.temp and self.temp_cursor_pos is not None:
             end = self.temp_cursor_pos
         else:
             end = self.end_point.scenePos()
-        painter.setPen(self._pen)
+        pen = QPen(self._pen)
+        if self.isSelected():
+            # 选中时高亮显示
+            c = pen.color()
+            pen.setColor(QColor(min(c.red()+80,255), min(c.green()+80,255), min(c.blue()+80,255)))
+            pen.setWidth(pen.width()+1)
+        painter.setPen(pen)
         painter.drawLine(start, end)
         # 若处于 active 状态且不支持 dash 偏移，可绘制额外流动点作为降级
         if self.status == 'active' and self._pen.style() != Qt.PenStyle.DashLine:
@@ -121,8 +145,34 @@ class BetterConnectionLine(QGraphicsItem):
         self.prepareGeometryChange()
         self.update()
 
-    def contextMenuEvent(self, event):
+    def contextMenuEvent(self, event: QGraphicsSceneContextMenuEvent):
         if self.canvas:
-            # 调用画布删除连接逻辑
-            self.canvas._remove_connection(self)
+            # 单独删除所选连接线（支持批量：若多条选中则统一删除）
+            selected = [it for it in self.canvas.scene.selectedItems() if isinstance(it, BetterConnectionLine)]
+            if selected:
+                for line in selected:
+                    self.canvas._remove_connection(line)
+            else:
+                self.canvas._remove_connection(self)
+        event.accept()
+
+    # ---- 悬停高亮 ----
+    def hoverEnterEvent(self, event):  # type: ignore
+        # 仅在未选中时稍微提高亮度与宽度
+        if not self.isSelected():
+            c = self._pen.color()
+            hl = QColor(min(c.red()+60,255), min(c.green()+60,255), min(c.blue()+60,255))
+            w = self._pen.width()+1
+            self._hover_backup = (self._pen.color(), self._pen.width())
+            self._pen.setColor(hl)
+            self._pen.setWidth(w)
+            self.update()
+        event.accept()
+
+    def hoverLeaveEvent(self, event):  # type: ignore
+        if hasattr(self, '_hover_backup') and not self.isSelected():
+            orig_color, orig_w = self._hover_backup
+            self._pen.setColor(orig_color)
+            self._pen.setWidth(orig_w)
+            self.update()
         event.accept()

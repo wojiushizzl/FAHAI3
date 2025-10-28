@@ -434,8 +434,11 @@ class PipelineExecutor:
             self.status = PipelineStatus.RUNNING
             data_context: Dict[str, Any] = input_data.copy() if input_data else {}
             start_t = time.time()
-            # 顺序执行
+            # 单次顺序执行 + 闸门阻断逻辑与持续运行保持一致
+            gate_skip_cache: set[str] = set()
             for node_id in order:
+                if node_id in gate_skip_cache:
+                    continue  # 被闸门标记需要跳过
                 node = self.nodes[node_id]
                 node_inputs = self._prepare_node_inputs(node, data_context)
                 node.module.receive_inputs(node_inputs)
@@ -446,10 +449,24 @@ class PipelineExecutor:
                 node.last_result = result
                 self._route_outputs(node, result, data_context)
                 self._notify_module_step(node_id, 'end')
-                # 中断检测 (布尔闸门等设置 request_abort)
+                # 中断检测
                 if getattr(node.module, 'request_abort', False) or (isinstance(result, dict) and result.get('abort') is True):
                     self.logger.info(f"run_once: 中断于节点 {node_id}")
                     break
+                # 闸门阻断: 收集后继
+                if getattr(node.module, 'request_gate_block', False):
+                    to_skip = set()
+                    stack = [s.node_id for s in node.successors]
+                    while stack:
+                        sid = stack.pop()
+                        if sid in to_skip:
+                            continue
+                        to_skip.add(sid)
+                        for nxt in self.nodes[sid].successors:
+                            stack.append(nxt.node_id)
+                    gate_skip_cache.update(to_skip)
+                    # 清理全局 data_context 中可能被后继消费的共享键（简单策略：不删除，或实现白名单；此处仅添加标记）
+                    data_context[f"gate_block_from_{node_id}"] = True
             exec_time = time.time() - start_t
             self.execution_count += 1
             self.total_execution_time += exec_time
@@ -560,6 +577,9 @@ class PipelineExecutor:
             # 原始逻辑
             for node_id in self.execution_order:
                 node = self.nodes[node_id]
+                # 闸门跳过逻辑：若之前某个闸门阻断标记了该节点，则直接 continue
+                if hasattr(self, '_gate_skip_cache') and node_id in self._gate_skip_cache:
+                    continue
                 node_inputs = self._prepare_node_inputs(node, current_data)
                 node.module.receive_inputs(node_inputs)
                 self._notify_module_step(node_id, 'start')
@@ -573,6 +593,20 @@ class PipelineExecutor:
                 if getattr(node.module, 'request_abort', False) or (isinstance(result, dict) and result.get('abort') is True):
                     self.logger.info(f"顺序执行中断于节点 {node_id}")
                     break
+                # 布尔闸门分支阻断：仅阻断其可达后继，不影响其它独立链路
+                if getattr(node.module, 'request_gate_block', False):
+                    to_skip = set()
+                    stack = [s.node_id for s in node.successors]
+                    while stack:
+                        sid = stack.pop()
+                        if sid in to_skip:
+                            continue
+                        to_skip.add(sid)
+                        for nxt in self.nodes[sid].successors:
+                            stack.append(nxt.node_id)
+                    if not hasattr(self, '_gate_skip_cache'):
+                        self._gate_skip_cache = set()
+                    self._gate_skip_cache.update(to_skip)
             return current_data
         # 自适应层级并发
         levels = self._calculate_execution_levels()
@@ -614,6 +648,8 @@ class PipelineExecutor:
                         return current_data
             # 顺序执行普通节点
             for nid in normal_nodes:
+                if hasattr(self, '_gate_skip_cache') and nid in self._gate_skip_cache:
+                    continue
                 node = self.nodes[nid]
                 node_inputs = self._prepare_node_inputs(node, current_data)
                 node.module.receive_inputs(node_inputs)
@@ -628,6 +664,19 @@ class PipelineExecutor:
                 if getattr(node.module, 'request_abort', False) or (isinstance(result, dict) and result.get('abort') is True):
                     self.logger.info(f"自适应并发普通层中断于节点 {nid}")
                     return current_data
+                if getattr(node.module, 'request_gate_block', False):
+                    to_skip = set()
+                    stack = [s.node_id for s in node.successors]
+                    while stack:
+                        sid = stack.pop()
+                        if sid in to_skip:
+                            continue
+                        to_skip.add(sid)
+                        for nxt in self.nodes[sid].successors:
+                            stack.append(nxt.node_id)
+                    if not hasattr(self, '_gate_skip_cache'):
+                        self._gate_skip_cache = set()
+                    self._gate_skip_cache.update(to_skip)
         return current_data
 
     def _execute_node_return_route(self, node: PipelineNode, current_data: Dict[str, Any]) -> None:
@@ -651,6 +700,8 @@ class PipelineExecutor:
             if len(level_nodes) == 1:
                 # 单个节点直接执行
                 node = self.nodes[level_nodes[0]]
+                if hasattr(self, '_gate_skip_cache') and node.node_id in self._gate_skip_cache:
+                    continue
                 node_inputs = self._prepare_node_inputs(node, current_data)
                 node.module.receive_inputs(node_inputs)
                 self._notify_module_step(node.node_id, 'start')
@@ -661,10 +712,25 @@ class PipelineExecutor:
                 node.last_result = result
                 self._route_outputs(node, result, current_data)
                 self._notify_module_step(node.node_id, 'end')
+                if getattr(node.module, 'request_gate_block', False):
+                    to_skip = set()
+                    stack = [s.node_id for s in node.successors]
+                    while stack:
+                        sid = stack.pop()
+                        if sid in to_skip:
+                            continue
+                        to_skip.add(sid)
+                        for nxt in self.nodes[sid].successors:
+                            stack.append(nxt.node_id)
+                    if not hasattr(self, '_gate_skip_cache'):
+                        self._gate_skip_cache = set()
+                    self._gate_skip_cache.update(to_skip)
             else:
                 # 多个节点并行执行
                 futures = []
                 for node_id in level_nodes:
+                    if hasattr(self, '_gate_skip_cache') and node_id in self._gate_skip_cache:
+                        continue
                     node = self.nodes[node_id]
                     node_inputs = self._prepare_node_inputs(node, current_data)
                     future = self.thread_pool.submit(self._execute_node, node, node_inputs)
@@ -676,6 +742,19 @@ class PipelineExecutor:
                         result = future.result(timeout=self.config.get("timeout", 30))
                         node.last_result = result
                         self._route_outputs(node, result, current_data)
+                        if getattr(node.module, 'request_gate_block', False):
+                            to_skip = set()
+                            stack = [s.node_id for s in node.successors]
+                            while stack:
+                                sid = stack.pop()
+                                if sid in to_skip:
+                                    continue
+                                to_skip.add(sid)
+                                for nxt in self.nodes[sid].successors:
+                                    stack.append(nxt.node_id)
+                            if not hasattr(self, '_gate_skip_cache'):
+                                self._gate_skip_cache = set()
+                            self._gate_skip_cache.update(to_skip)
                     except Exception as e:
                         self.logger.error(f"节点执行失败: {node.node_id}, {e}")
                         

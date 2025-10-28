@@ -3,6 +3,13 @@
 """
 图片导入模块
 从单文件、目录或文件列表依次读取图像作为帧输出，支持循环、间隔、颜色转换与可选缩放。
+
+新增: control 输入布尔端口 (True 继续 / False 暂停推进索引)
+        - 当 control=False 时，不自增文件索引。
+        - skip_behavior = hold: 返回上一帧 (附加 status=skipped-hold)
+            skip_behavior = empty: 返回仅含 status=skipped，不提供 image/path/index。
+        - 暂停期间 interval 计时仍然运行；恢复后按当前 idx 继续。
+        - control 支持宽松字符串/数字解析: 'pause','stop','0' -> False; 'run','start','1' -> True。
 """
 from typing import Any, Dict, List, Optional
 import os
@@ -38,6 +45,7 @@ class ImageImportModule(BaseModule):
         sort: bool = True                   # 是否排序文件列表
         max_files: int = 0                  # 限制最大文件数, 0 不限制
         file_list: List[str] = []           # source_type == list 时使用
+        skip_behavior: str = "hold"        # control==False 时行为: hold(保持上一帧) | empty(返回空字典)
 
         @validator("source_type")
         def _src_ok(cls, v):
@@ -70,6 +78,8 @@ class ImageImportModule(BaseModule):
         self._files: List[str] = []
         self._idx: int = 0
         self._last_time: float = 0.0
+        self._last_frame: Optional[np.ndarray] = None
+        self._last_meta: Dict[str, Any] = {}
         self.config.update({
             "source_type": "file",
             "path": "",
@@ -82,6 +92,7 @@ class ImageImportModule(BaseModule):
             "sort": True,
             "max_files": 0,
             "file_list": [],
+            "skip_behavior": "hold",
         })
 
     @property
@@ -95,7 +106,8 @@ class ImageImportModule(BaseModule):
             self.register_output_port("index", port_type="meta", desc="当前索引")
             self.register_output_port("timestamp", port_type="meta", desc="时间戳")
         if not self.input_ports:
-            self.register_input_port("control", port_type="control", desc="控制指令", required=False)
+            # control: True=正常读取; False=暂停推进(不自增索引)。
+            self.register_input_port("control", port_type="bool", desc="运行控制: False 暂停推进", required=False)
 
     def _on_start(self):
         self._rebuild_file_list()
@@ -167,6 +179,34 @@ class ImageImportModule(BaseModule):
             return None
 
     def process(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        control_raw = inputs.get("control")
+        control = True
+        if control_raw is not None:
+            # 宽松解析
+            if isinstance(control_raw, bool):
+                control = control_raw
+            elif isinstance(control_raw, (int, float)):
+                control = control_raw != 0
+            elif isinstance(control_raw, str):
+                v = control_raw.strip().lower()
+                if v in {"false", "0", "no", "n", "stop", "pause"}:
+                    control = False
+                elif v in {"true", "1", "yes", "y", "run", "start"}:
+                    control = True
+        if not control:
+            # 不推进索引，返回保持或空
+            behavior = self.config.get("skip_behavior", "hold")
+            if behavior == "hold" and self._last_frame is not None:
+                # 返回上一帧及其 meta，加 status 标记
+                out = {
+                    "image": self._last_frame,
+                    "path": self._last_meta.get("path"),
+                    "index": self._last_meta.get("index"),
+                    "timestamp": self._last_meta.get("timestamp"),
+                    "status": "skipped-hold",
+                }
+                return out
+            return {"status": "skipped"}
         # 间隔控制
         interval_ms = int(self.config.get("interval_ms", 0))
         if interval_ms > 0:
@@ -188,12 +228,16 @@ class ImageImportModule(BaseModule):
         if img is None:
             return {"error": f"读取失败: {os.path.basename(path)}"}
         ts = time.time()
-        return {
+        out = {
             "image": img,
             "path": path,
             "index": self._idx - 1,
             "timestamp": ts,
+            "status": "ok"
         }
+        self._last_frame = img
+        self._last_meta = out
+        return out
 
     def get_status(self) -> Dict[str, Any]:
         base = super().get_status()
@@ -201,5 +245,6 @@ class ImageImportModule(BaseModule):
             "total_files": len(self._files),
             "current_index": self._idx,
             "loop": self.config.get("loop", True),
+            "last_status": self._last_meta.get("status") if self._last_meta else None,
         })
         return base

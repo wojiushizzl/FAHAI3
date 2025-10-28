@@ -11,6 +11,7 @@ from PyQt6.QtGui import QDrag, QPixmap, QIcon, QPainter, QShortcut, QKeySequence
 from app.pipeline.module_registry import list_registered_modules, get_module_class
 from app.pipeline.base_module import ModuleType
 from app.pipeline.utility.category_utils import classify_module
+from app.utils.i18n import bilingual
 
 
 class ModuleToolbox(QWidget):
@@ -56,10 +57,9 @@ class ModuleToolbox(QWidget):
         规则与 EnhancedFlowCanvas.contextMenuEvent 中保持一致，避免分类不一致。
         """
         self.tree.clear()
-
         groups = {k: [] for k in ['输入', '模型', '显示', '存储', '协议', '脚本', '逻辑', '其它']}
 
-        def classify(name: str, cls) -> str:
+        def classify_local(name: str, cls) -> str:
             try:
                 mtype = cls(name=name).module_type if cls else None
             except Exception:
@@ -68,20 +68,20 @@ class ModuleToolbox(QWidget):
 
         for display in list_registered_modules():
             cls = get_module_class(display)
-            cat = classify(display, cls)
+            cat = classify_local(display, cls)
             groups[cat].append(display)
 
         # 构建树节点
         for gname, items in groups.items():
             if not items:
                 continue
-            gnode = QTreeWidgetItem([gname])
+            gnode = QTreeWidgetItem([bilingual(gname)])
             # 分组节点不允许直接拖拽
             gnode.setFlags(gnode.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
             self.tree.addTopLevelItem(gnode)
             for mod in sorted(items):
-                inode = QTreeWidgetItem([mod])
-                inode.setData(0, Qt.ItemDataRole.UserRole, mod)
+                inode = QTreeWidgetItem([bilingual(mod)])
+                inode.setData(0, Qt.ItemDataRole.UserRole, mod)  # 保留原始标识在 UserRole
                 inode.setIcon(0, self._make_icon(mod, gname))
                 gnode.addChild(inode)
             gnode.setExpanded(True)
@@ -188,7 +188,10 @@ class ModuleToolbox(QWidget):
                 inst = cls(name=name)
                 ins = ','.join(inst.input_ports.keys())
                 outs = ','.join(inst.output_ports.keys())
-                ports_str = f"{ins}|{outs}"
+                # bilingual ports 仅在常见端口进行映射
+                bins = ','.join(bilingual(p) for p in inst.input_ports.keys())
+                bouts = ','.join(bilingual(p) for p in inst.output_ports.keys())
+                ports_str = f"{bins}|{bouts}"
                 mime.setData('application/x-fahai-ports', ports_str.encode('utf-8'))
             except Exception:
                 pass
@@ -198,7 +201,7 @@ class ModuleToolbox(QWidget):
         px.fill(Qt.GlobalColor.white)
         p = QPainter(px)
         p.drawRect(0,0,139,39)
-        p.drawText(4,16, name)
+        p.drawText(4,16, bilingual(name))
         if ports_str:
             p.drawText(4,32, ports_str)
         p.end()
