@@ -49,4 +49,44 @@ def bilingual(label: str) -> str:
         return label
     return label  # 英文未知保持原样
 
-__all__ = ["bilingual"]
+_LANG_MODE = 'both'  # zh | en | both
+
+def set_language_mode(mode: str):
+    global _LANG_MODE
+    if mode not in ('zh','en','both'):
+        return
+    _LANG_MODE = mode
+
+def get_language_mode() -> str:
+    return _LANG_MODE
+
+def translate(label: str) -> str:
+    """按当前语言模式返回：
+    - zh: 仅中文 (若输入英文且有反向映射则转中文)
+    - en: 仅英文 (若输入中文且有映射则转英文)
+    - both: bilingual(label)
+    未知词保持原样。
+    """
+    if _LANG_MODE == 'both':
+        return bilingual(label)
+    if _LANG_MODE == 'zh':
+        # 若是英文且有中文映射
+        if label in _REVERSE:
+            return _REVERSE[label]
+        return label
+    if _LANG_MODE == 'en':
+        if label in _MAPPING:
+            return _MAPPING[label]
+        return label
+    return label
+
+def L(cn: str, en: str) -> str:
+    """快捷双语文本: 根据模式返回中文 / 英文 / 组合"""
+    mode = get_language_mode()
+    if mode == 'zh':
+        return cn
+    if mode == 'en':
+        return en
+    return f"{cn} {en}"
+
+__all__ = ["bilingual","set_language_mode","get_language_mode","translate","L"]

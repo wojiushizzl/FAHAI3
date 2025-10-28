@@ -11,7 +11,7 @@ from PyQt6.QtGui import QDrag, QPixmap, QIcon, QPainter, QShortcut, QKeySequence
 from app.pipeline.module_registry import list_registered_modules, get_module_class
 from app.pipeline.base_module import ModuleType
 from app.pipeline.utility.category_utils import classify_module
-from app.utils.i18n import bilingual
+from app.utils.i18n import bilingual, translate, get_language_mode
 
 
 class ModuleToolbox(QWidget):
@@ -75,12 +75,15 @@ class ModuleToolbox(QWidget):
         for gname, items in groups.items():
             if not items:
                 continue
-            gnode = QTreeWidgetItem([bilingual(gname)])
+            # 根据语言模式: both=双语, 其它=translate
+            label = bilingual(gname) if get_language_mode() == 'both' else translate(gname)
+            gnode = QTreeWidgetItem([label])
             # 分组节点不允许直接拖拽
             gnode.setFlags(gnode.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
             self.tree.addTopLevelItem(gnode)
             for mod in sorted(items):
-                inode = QTreeWidgetItem([bilingual(mod)])
+                mod_label = bilingual(mod) if get_language_mode() == 'both' else translate(mod)
+                inode = QTreeWidgetItem([mod_label])
                 inode.setData(0, Qt.ItemDataRole.UserRole, mod)  # 保留原始标识在 UserRole
                 inode.setIcon(0, self._make_icon(mod, gname))
                 gnode.addChild(inode)
@@ -201,7 +204,8 @@ class ModuleToolbox(QWidget):
         px.fill(Qt.GlobalColor.white)
         p = QPainter(px)
         p.drawRect(0,0,139,39)
-        p.drawText(4,16, bilingual(name))
+        nm = bilingual(name) if get_language_mode() == 'both' else translate(name)
+        p.drawText(4,16, nm)
         if ports_str:
             p.drawText(4,32, ports_str)
         p.end()

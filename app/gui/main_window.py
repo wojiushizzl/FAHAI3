@@ -17,6 +17,7 @@ import threading, time
 from typing import Dict, Any
 from .dock_panel import DockPanel, PropertyPanel
 import os
+from app.utils.i18n import set_language_mode, get_language_mode, translate, L
 
 
 class MainWindow(QMainWindow):
@@ -62,7 +63,9 @@ class MainWindow(QMainWindow):
         # 编辑相关动作集合（用于锁定时禁用）在菜单初始化时填充
         self._edit_related_actions: list[QAction] = []
 
-        # 初始化UI组件 & 菜单/工具栏/状态栏
+        # 先加载用户设置(语言/运行间隔)以便后续 UI 初始化直接使用正确语言
+        self._load_user_settings()
+        # 初始化UI组件 & 菜单/工具栏/状态栏（此时语言模式已就位）
         self._init_ui()
         self._init_menu()
         self._init_toolbar()
@@ -106,8 +109,7 @@ class MainWindow(QMainWindow):
         # 预热进度条持久化状态：达到 100% 后保持绿色直到项目切换
         self._warmup_completed_persist: bool = False
         self._warmup_bar_last_style: str = 'inactive'
-        # 加载用户设置 (运行间隔等)
-        self._load_user_settings()
+    # （语言与运行间隔已在构造早期加载）
 
     def _init_ui(self):
         """初始化用户界面"""
@@ -152,120 +154,127 @@ class MainWindow(QMainWindow):
         # 菜单在 _init_menu 中创建
         
     def _init_menu(self):
-        """初始化菜单栏"""
+        """初始化菜单栏 (首次) -> 调用重建逻辑"""
+        self._rebuild_menus()
+
+    def _rebuild_menus(self):
+        """根据当前语言模式重建整套菜单。"""
         menubar = self.menuBar()
+        menubar.clear()
+        self._edit_related_actions = []
+
+        def L(cn: str, en: str):
+            mode = get_language_mode()
+            if mode == 'zh':
+                return cn
+            if mode == 'en':
+                return en
+            return f"{cn} {en}"
+
         # 文件菜单
-        file_menu = menubar.addMenu('文件(&F)')
-        new_action = QAction('新建项目(&N)', self)
+        file_menu = menubar.addMenu(L('文件','File'))
+        new_action = QAction(L('新建项目','New Project'), self)
         new_action.setShortcut(QKeySequence(QKeySequence.StandardKey.New))
-        new_action.triggered.connect(self._new_project)
-        file_menu.addAction(new_action)
-        open_action = QAction('打开项目(&O)', self)
+        new_action.triggered.connect(self._new_project); file_menu.addAction(new_action)
+        open_action = QAction(L('打开项目','Open Project'), self)
         open_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Open))
-        open_action.triggered.connect(self._open_project)
-        file_menu.addAction(open_action)
+        open_action.triggered.connect(self._open_project); file_menu.addAction(open_action)
         file_menu.addSeparator()
-        save_action = QAction('保存流程(&S)', self)
+        save_action = QAction(L('保存流程','Save Pipeline'), self)
         save_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Save))
-        save_action.triggered.connect(self._save_project)
-        file_menu.addAction(save_action)
-        save_as_action = QAction('另存为(&A)', self)
+        save_action.triggered.connect(self._save_project); file_menu.addAction(save_action)
+        save_as_action = QAction(L('另存为','Save As'), self)
         save_as_action.setShortcut(QKeySequence('Ctrl+Shift+S'))
-        save_as_action.triggered.connect(self._save_project_as)
-        file_menu.addAction(save_as_action)
-        load_action = QAction('加载流程(&L)', self)
+        save_as_action.triggered.connect(self._save_project_as); file_menu.addAction(save_as_action)
+        load_action = QAction(L('加载流程','Load Pipeline'), self)
         load_action.setShortcut(QKeySequence('Ctrl+Shift+O'))
-        load_action.triggered.connect(self._open_project)
-        file_menu.addAction(load_action)
+        load_action.triggered.connect(self._open_project); file_menu.addAction(load_action)
         file_menu.addSeparator()
-        exit_action = QAction('退出(&X)', self)
+        exit_action = QAction(L('退出','Exit'), self)
         exit_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Quit))
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        exit_action.triggered.connect(self.close); file_menu.addAction(exit_action)
+
         # 编辑菜单
-        edit_menu = menubar.addMenu('编辑(&E)')
-        undo_action = QAction('撤销(&U)', self); undo_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Undo)); undo_action.triggered.connect(self._undo); edit_menu.addAction(undo_action)
-        redo_action = QAction('重做(&R)', self); redo_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Redo)); redo_action.triggered.connect(self._redo); edit_menu.addAction(redo_action)
+        edit_menu = menubar.addMenu(L('编辑','Edit'))
+        undo_action = QAction(L('撤销','Undo'), self); undo_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Undo)); undo_action.triggered.connect(self._undo); edit_menu.addAction(undo_action)
+        redo_action = QAction(L('重做','Redo'), self); redo_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Redo)); redo_action.triggered.connect(self._redo); edit_menu.addAction(redo_action)
         edit_menu.addSeparator()
-        copy_action = QAction('复制(&C)', self); copy_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Copy)); copy_action.triggered.connect(self._copy); edit_menu.addAction(copy_action)
-        paste_action = QAction('粘贴(&V)', self); paste_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Paste)); paste_action.triggered.connect(self._paste); edit_menu.addAction(paste_action)
-        delete_action = QAction('删除(&D)', self); delete_action.setShortcut(QKeySequence('Delete')); delete_action.triggered.connect(self._delete); edit_menu.addAction(delete_action)
-        duplicate_action = QAction('复制并偏移(&D)', self); duplicate_action.setShortcut(QKeySequence('Ctrl+D')); duplicate_action.triggered.connect(self._duplicate_selection); edit_menu.addAction(duplicate_action)
+        copy_action = QAction(L('复制','Copy'), self); copy_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Copy)); copy_action.triggered.connect(self._copy); edit_menu.addAction(copy_action)
+        paste_action = QAction(L('粘贴','Paste'), self); paste_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Paste)); paste_action.triggered.connect(self._paste); edit_menu.addAction(paste_action)
+        delete_action = QAction(L('删除','Delete'), self); delete_action.setShortcut(QKeySequence('Delete')); delete_action.triggered.connect(self._delete); edit_menu.addAction(delete_action)
+        duplicate_action = QAction(L('复制并偏移','Duplicate Offset'), self); duplicate_action.setShortcut(QKeySequence('Ctrl+D')); duplicate_action.triggered.connect(self._duplicate_selection); edit_menu.addAction(duplicate_action)
+
         # 运行菜单
-        run_menu = menubar.addMenu('运行(&R)')
-        run_action = QAction('运行流程(&R)', self); run_action.setShortcut(QKeySequence('F5')); run_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut); run_action.triggered.connect(self._run_pipeline); run_menu.addAction(run_action)
-        pause_action = QAction('暂停(&P)', self); pause_action.setShortcut(QKeySequence('F6')); pause_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut); pause_action.triggered.connect(self._pause_pipeline); run_menu.addAction(pause_action)
-        resume_action = QAction('恢复(&E)', self); resume_action.setShortcut(QKeySequence('F7')); resume_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut); resume_action.triggered.connect(self._resume_pipeline); run_menu.addAction(resume_action)
-        stop_action = QAction('停止运行(&S)', self); stop_action.setShortcut(QKeySequence('F8')); stop_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut); stop_action.triggered.connect(self._stop_pipeline); run_menu.addAction(stop_action)
-        run_once_action = QAction('运行一次(&O)', self); run_once_action.setShortcut(QKeySequence('F9')); run_once_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut); run_once_action.triggered.connect(self._run_pipeline_once); run_menu.addAction(run_once_action)
-        # 帮助菜单
-        help_menu = menubar.addMenu('帮助(&H)')
-        about_action = QAction('关于(&A)', self); about_action.triggered.connect(self._show_about); help_menu.addAction(about_action)
+        run_menu = menubar.addMenu(L('运行','Run'))
+        run_action = QAction(L('运行流程','Run Pipeline'), self); run_action.setShortcut(QKeySequence('F5')); run_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut); run_action.triggered.connect(self._run_pipeline); run_menu.addAction(run_action)
+        pause_action = QAction(L('暂停','Pause'), self); pause_action.setShortcut(QKeySequence('F6')); pause_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut); pause_action.triggered.connect(self._pause_pipeline); run_menu.addAction(pause_action)
+        resume_action = QAction(L('恢复','Resume'), self); resume_action.setShortcut(QKeySequence('F7')); resume_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut); resume_action.triggered.connect(self._resume_pipeline); run_menu.addAction(resume_action)
+        stop_action = QAction(L('停止运行','Stop'), self); stop_action.setShortcut(QKeySequence('F8')); stop_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut); stop_action.triggered.connect(self._stop_pipeline); run_menu.addAction(stop_action)
+        run_once_action = QAction(L('运行一次','Run Once'), self); run_once_action.setShortcut(QKeySequence('F9')); run_once_action.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut); run_once_action.triggered.connect(self._run_pipeline_once); run_menu.addAction(run_once_action)
+
         # 监控菜单
-        monitor_menu = menubar.addMenu('监控(&M)')
-        reset_metrics_action = QAction('重置性能指标', self); reset_metrics_action.triggered.connect(self.reset_executor_metrics); monitor_menu.addAction(reset_metrics_action)
-        toggle_sysinfo_action = QAction('系统信息轮询', self); toggle_sysinfo_action.setCheckable(True); toggle_sysinfo_action.setChecked(True); toggle_sysinfo_action.triggered.connect(self._toggle_system_info); monitor_menu.addAction(toggle_sysinfo_action)
-        grid_toggle_action = QAction('切换网格显示', self); grid_toggle_action.triggered.connect(lambda: self.flow_canvas.toggle_grid()); monitor_menu.addAction(grid_toggle_action)
-        # 自动 YOLO 预热开关
-        self._auto_preheat_enabled = True
-        auto_preheat_action = QAction('自动YOLO预热', self)
+        monitor_menu = menubar.addMenu(L('监控','Monitor'))
+        reset_metrics_action = QAction(L('重置性能指标','Reset Metrics'), self); reset_metrics_action.triggered.connect(self.reset_executor_metrics); monitor_menu.addAction(reset_metrics_action)
+        toggle_sysinfo_action = QAction(L('系统信息轮询','System Info Poll'), self); toggle_sysinfo_action.setCheckable(True); toggle_sysinfo_action.setChecked(getattr(self, '_sysinfo_enabled', True)); toggle_sysinfo_action.triggered.connect(self._toggle_system_info); monitor_menu.addAction(toggle_sysinfo_action)
+        grid_toggle_action = QAction(L('切换网格显示','Toggle Grid'), self); grid_toggle_action.triggered.connect(lambda: self.flow_canvas.toggle_grid()); monitor_menu.addAction(grid_toggle_action)
+        # 自动预热
+        if not hasattr(self, '_auto_preheat_enabled'):
+            self._auto_preheat_enabled = True
+        auto_preheat_action = QAction(L('自动YOLO预热','Auto YOLO Warmup'), self)
         auto_preheat_action.setCheckable(True)
-        auto_preheat_action.setChecked(True)
+        auto_preheat_action.setChecked(self._auto_preheat_enabled)
         def _toggle_preheat(checked: bool):
             self._auto_preheat_enabled = bool(checked)
             if hasattr(self, 'statusbar'):
-                self.statusbar.showMessage('自动YOLO预热' + ('已启用' if checked else '已关闭'), 3000)
+                msg = L('自动YOLO预热','Auto YOLO Warmup') + (L('已启用',' Enabled') if checked else L('已关闭',' Disabled'))
+                self.statusbar.showMessage(msg, 3000)
         auto_preheat_action.toggled.connect(_toggle_preheat)
         monitor_menu.addAction(auto_preheat_action)
-        # 设置运行循环间隔
-        set_interval_action = QAction('设置运行间隔(ms)', self)
+        # 设置运行间隔
+        set_interval_action = QAction(L('设置运行间隔(ms)','Set Interval (ms)'), self)
         def _set_interval():
             from PyQt6.QtWidgets import QInputDialog
             cur_ms = int(self._feeder_interval_sec * 1000)
-            val, ok = QInputDialog.getInt(self, '运行间隔', '循环投递空输入触发执行的间隔 (毫秒):', cur_ms, 50, 10000, 50)
+            val, ok = QInputDialog.getInt(self, L('运行间隔','Run Interval'), L('循环投递空输入触发执行的间隔 (毫秒):','Interval for pushing empty input (ms):'), cur_ms, 50, 10000, 50)
             if not ok:
                 return
             self._feeder_interval_sec = max(0.05, val/1000.0)
-            self._post_status(f'已设置运行间隔: {val}ms', 3000)
-            # 持久化保存
+            self._post_status(L('已设置运行间隔:','Set interval:')+f' {val}ms', 3000)
             self._persist_user_settings()
         set_interval_action.triggered.connect(_set_interval)
         monitor_menu.addAction(set_interval_action)
-        # 调试: 强制刷新所有模块视觉
-        refresh_view_act = QAction('刷新所有模块视觉', self)
+        # 刷新视觉
+        refresh_view_act = QAction(L('刷新所有模块视觉','Refresh Module Visuals'), self)
         def _do_refresh_all():
             try:
                 for m in getattr(self.flow_canvas, 'modules', []):
                     if hasattr(m, 'refresh_visual'):
                         m.refresh_visual()
-                self.statusbar.showMessage('已刷新所有模块视觉', 3000)
+                self.statusbar.showMessage(L('已刷新所有模块视觉','All module visuals refreshed'), 3000)
             except Exception as e:
-                self.statusbar.showMessage(f'刷新失败: {e}', 5000)
+                self.statusbar.showMessage(L('刷新失败:','Refresh failed:')+f'{e}', 5000)
         refresh_view_act.triggered.connect(_do_refresh_all)
         monitor_menu.addAction(refresh_view_act)
+
         # 视图菜单
-        view_menu = menubar.addMenu('视图(&V)')
-        theme_toggle_action = QAction('黑白反转主题', self); theme_toggle_action.setCheckable(True); theme_toggle_action.setChecked(False); theme_toggle_action.triggered.connect(lambda checked: self._toggle_invert_theme(checked)); view_menu.addAction(theme_toggle_action)
-        # 属性面板显示切换
+        view_menu = menubar.addMenu(L('视图','View'))
+        theme_toggle_action = QAction(L('黑白反转主题','Invert Theme'), self); theme_toggle_action.setCheckable(True); theme_toggle_action.setChecked(getattr(self, '_theme_inverted', False)); theme_toggle_action.triggered.connect(lambda checked: self._toggle_invert_theme(checked)); view_menu.addAction(theme_toggle_action)
         if hasattr(self, 'property_dock'):
-            toggle_prop_act = QAction('属性面板', self)
+            toggle_prop_act = QAction(L('属性面板','Property Panel'), self)
             toggle_prop_act.setCheckable(True)
-            # 初始根据当前可见性
             toggle_prop_act.setChecked(self.property_dock.isVisible())
             def _sync_prop_vis(checked: bool):
                 try:
                     if checked:
-                        self.property_dock.show()
-                        self.property_dock.raise_()
+                        self.property_dock.show(); self.property_dock.raise_()
                     else:
                         self.property_dock.hide()
                     if hasattr(self, 'statusbar'):
-                        self.statusbar.showMessage('属性面板已' + ('显示' if checked else '隐藏'), 2500)
+                        self.statusbar.showMessage(L('属性面板已','Property panel ')+(L('显示','shown') if checked else L('隐藏','hidden')), 2500)
                 except Exception as e:
                     if hasattr(self, 'statusbar'):
-                        self.statusbar.showMessage(f'属性面板切换失败: {e}', 4000)
+                        self.statusbar.showMessage(L('属性面板切换失败:','Property panel toggle failed:')+f'{e}', 4000)
             toggle_prop_act.toggled.connect(_sync_prop_vis)
-            # 当用户通过其它方式关闭 Dock 时保持菜单状态同步
             def _on_dock_visibility_changed(vis: bool):
                 try:
                     if toggle_prop_act.isChecked() != vis:
@@ -277,29 +286,95 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             view_menu.addAction(toggle_prop_act)
-        # 收集需要在锁定时禁用的动作（编辑类）
+
+        # 帮助菜单
+        help_menu = menubar.addMenu(L('帮助','Help'))
+        about_action = QAction(L('关于','About'), self); about_action.triggered.connect(self._show_about); help_menu.addAction(about_action)
+
+        # 语言菜单（简单显示，当前菜单本身已在 rebuild 前建立, 这里仅提供切换入口）
+        lang_menu = menubar.addMenu(L('语言','Language'))
+        def _lang_act(text_cn, text_en, mode):
+            act = QAction(L(text_cn, text_en), self)
+            act.setCheckable(True)
+            if get_language_mode() == mode:
+                act.setChecked(True)
+            def _apply():
+                if act.isChecked():
+                    set_language_mode(mode)
+                    # 递归重建
+                    self._rebuild_menus()
+                    # 重建工具栏
+                    try:
+                        self._build_toolbar()
+                    except Exception:
+                        pass
+                    # 刷新工具箱与模块标题
+                    try:
+                        self.dock_panel.module_toolbox.refresh_modules()  # type: ignore
+                    except Exception:
+                        pass
+                    try:
+                        if hasattr(self.flow_canvas, 'modules'):
+                            for m in getattr(self.flow_canvas, 'modules', []):
+                                if hasattr(m,'text_item') and hasattr(m,'module_type'):
+                                    m.text_item.setPlainText(self._translate_module_type(m.module_type))
+                                    if hasattr(m,'_center_title'):
+                                        m._center_title()
+                    except Exception:
+                        pass
+                    self._persist_user_settings()
+            act.triggered.connect(_apply)
+            lang_menu.addAction(act)
+        _lang_act('中文','Chinese','zh')
+        _lang_act('英文','English','en')
+        _lang_act('中英','Both','both')
+
+        # 收集编辑相关动作
         self._edit_related_actions.extend([
             undo_action, redo_action, copy_action, paste_action, delete_action, duplicate_action,
         ])
 
+        # （已移除旧的重复语言菜单块，使用上方统一的 lang_menu 逻辑）
+
     def _init_toolbar(self):
-        """初始化工具栏"""
-        toolbar = self.addToolBar('主工具栏')
+        """初始化工具栏 (首次) 并存引用; 后续语言切换可重建"""
+        self._build_toolbar()
+
+    def _build_toolbar(self):
+        # 若已存在旧 toolbar(s) 移除重建，避免重复按钮累计
+        try:
+            # findChildren 以确保全部清理（极端情况下可能出现多个残留）
+            for tb in self.findChildren(QToolBar):
+                if tb.objectName() == 'MainToolBar':
+                    self.removeToolBar(tb)
+        except Exception:
+            pass
+        # 重置编辑相关动作集合（仅保留语言菜单重建之前填充的基础编辑动作）
+        base_actions = []
+        for act in getattr(self, '_edit_related_actions', []):
+            base_actions.append(act)
+        self._edit_related_actions = base_actions
+        from app.utils.i18n import get_language_mode
+        def L(cn: str, en: str):
+            mode = get_language_mode()
+            if mode == 'zh': return cn
+            if mode == 'en': return en
+            return f"{cn} {en}"
+        toolbar = self.addToolBar(L('主工具栏','Main Toolbar'))
         toolbar.setObjectName('MainToolBar')
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        
-        run_act = QAction('运行 F5', self); run_act.triggered.connect(self._run_pipeline)
-        pause_act = QAction('暂停 F6', self); pause_act.triggered.connect(self._pause_pipeline)
-        resume_act = QAction('恢复 F7', self); resume_act.triggered.connect(self._resume_pipeline)
-        stop_act = QAction('停止 F8', self); stop_act.triggered.connect(self._stop_pipeline)
-        run_once_act = QAction('单次 F9', self); run_once_act.triggered.connect(self._run_pipeline_once)
-        inject_act = QAction('注入数据', self); inject_act.triggered.connect(self._inject_data)
-        edit_act = QAction('编辑模块', self); edit_act.triggered.connect(self._edit_selected_module)
+        run_act = QAction(L('运行','Run')+' F5', self); run_act.triggered.connect(self._run_pipeline)
+        pause_act = QAction(L('暂停','Pause')+' F6', self); pause_act.triggered.connect(self._pause_pipeline)
+        resume_act = QAction(L('恢复','Resume')+' F7', self); resume_act.triggered.connect(self._resume_pipeline)
+        stop_act = QAction(L('停止','Stop')+' F8', self); stop_act.triggered.connect(self._stop_pipeline)
+        run_once_act = QAction(L('单次','Once')+' F9', self); run_once_act.triggered.connect(self._run_pipeline_once)
+        inject_act = QAction(L('注入数据','Inject Data'), self); inject_act.triggered.connect(self._inject_data)
+        edit_act = QAction(L('编辑模块','Edit Module'), self); edit_act.triggered.connect(self._edit_selected_module)
         toolbar.addActions([run_act, pause_act, resume_act, stop_act, run_once_act, inject_act, edit_act])
         # 画布锁定切换：锁定后禁止任何编辑（添加/删除/拖动/连线），仍可运行流程。
-        self._lock_act = QAction('锁定画布', self)
+        self._lock_act = QAction(L('锁定画布','Lock Canvas'), self)
         self._lock_act.setCheckable(True)
-        self._lock_act.setToolTip('锁定后禁止编辑，只能查看和运行')
+        self._lock_act.setToolTip(L('锁定后禁止编辑，只能查看和运行','When locked: view/run only, no editing'))
         def _toggle_lock(checked: bool):
             if hasattr(self, 'flow_canvas'):
                 self.flow_canvas.set_locked(checked)
@@ -310,7 +385,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'property_panel'):
                 self.property_panel.setEnabled(not checked)
             if hasattr(self, 'statusbar'):
-                self.statusbar.showMessage('画布已锁定' if checked else '画布已解锁')
+                self.statusbar.showMessage(L('画布已锁定','Canvas locked') if checked else L('画布已解锁','Canvas unlocked'))
         self._lock_act.toggled.connect(_toggle_lock)
         toolbar.addAction(self._lock_act)
         # 工具栏中的编辑相关动作加入集合
@@ -319,7 +394,7 @@ class MainWindow(QMainWindow):
     def _init_statusbar(self):
         """初始化状态栏"""
         self.statusbar = self.statusBar()
-        self.statusbar.showMessage('就绪')
+        self.statusbar.showMessage(L('就绪','Ready'))
         # 右侧系统信息标签 + 进度条
         self.cpu_bar = QProgressBar()
         self.cpu_bar.setRange(0,100)
@@ -336,9 +411,9 @@ class MainWindow(QMainWindow):
         self.disk_bar.setFixedWidth(80)
         self.disk_bar.setTextVisible(False)
         self.disk_bar.setStyleSheet("QProgressBar { border:1px solid #bbb; background:#eee; } QProgressBar::chunk { background:#ff9800; }")
-        self.sysinfo_label = QLabel("CPU: --% | GPU: -- | Disk: --")
+        self.sysinfo_label = QLabel(L("CPU: --% | GPU: -- | 磁盘: --","CPU: --% | GPU: -- | Disk: --"))
         self.sysinfo_label.setStyleSheet("QLabel { color: #555; padding-left:6px; }")
-        self.metrics_label = QLabel("Exec: 0 | Avg: 0ms | Slow: -")
+        self.metrics_label = QLabel(L("执行:0 | 平均:0ms | 最慢:-","Exec:0 | Avg:0ms | Slow:-"))
         self.metrics_label.setStyleSheet("QLabel { color:#444; padding-left:12px; }")
         # YOLO 预热进度条（持久化完成）
         self.warmup_bar = QProgressBar()
@@ -349,13 +424,13 @@ class MainWindow(QMainWindow):
         self.warmup_bar.setToolTip("YOLO 模型预热进度 (全部模块平均百分比) | 绿色=完成 | 紫色=进行中 | 灰色=未开始")
         # 添加到状态栏
         self.statusbar.addPermanentWidget(self.metrics_label)
-        self.statusbar.addPermanentWidget(QLabel("CPU"))
+        self.statusbar.addPermanentWidget(QLabel(L("CPU","CPU")))
         self.statusbar.addPermanentWidget(self.cpu_bar)
-        self.statusbar.addPermanentWidget(QLabel("GPU"))
+        self.statusbar.addPermanentWidget(QLabel(L("GPU","GPU")))
         self.statusbar.addPermanentWidget(self.gpu_bar)
-        self.statusbar.addPermanentWidget(QLabel("Disk"))
+        self.statusbar.addPermanentWidget(QLabel(L("磁盘","Disk")))
         self.statusbar.addPermanentWidget(self.disk_bar)
-        self.statusbar.addPermanentWidget(QLabel("Warmup"))
+        self.statusbar.addPermanentWidget(QLabel(L("预热","Warmup")))
         self.statusbar.addPermanentWidget(self.warmup_bar)
         self.statusbar.addPermanentWidget(self.sysinfo_label)
         
@@ -416,13 +491,13 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'flow_canvas') and hasattr(self.flow_canvas, 'set_dark_theme'):
             self.flow_canvas.set_dark_theme(checked)
         if hasattr(self, 'statusbar'):
-            self.statusbar.showMessage('已启用反转主题' if checked else '已恢复默认主题')
+            self.statusbar.showMessage(L('已启用反转主题','Inverted theme on') if checked else L('已恢复默认主题','Theme restored'))
         
     # 菜单动作槽函数
     def _new_project(self):
         """新建项目"""
         self.flow_canvas.clear()
-        self.statusbar.showMessage('新建项目')
+        self.statusbar.showMessage(L('新建项目','New project'))
         self._reset_warmup_state()
         
     def _open_project(self):
@@ -435,22 +510,22 @@ class MainWindow(QMainWindow):
         self._reset_warmup_state()
         ok = self.flow_canvas.load_from_file(path)
         if ok:
-            self.statusbar.showMessage(f'加载成功: {path}')
+            self.statusbar.showMessage(L('加载成功:','Loaded:')+f' {path}')
             if os.path.basename(path).lower() == 'sample.json':
                 self._current_pipeline_path = None
-                self.statusbar.showMessage('加载模板 sample.json，保存将提示新文件名')
+                self.statusbar.showMessage(L('加载模板 sample.json，保存将提示新文件名','Template sample.json loaded, Save will ask new name'))
             else:
                 self._current_pipeline_path = path
             self._persist_last_project(path)
         else:
-            self.statusbar.showMessage('加载失败')
+            self.statusbar.showMessage(L('加载失败','Load failed'))
         
     def _save_project(self):
         """保存流程到当前文件；若无当前路径则提示另存为。"""
         # 节流: 避免短时间重复触发 Ctrl+S 导致磁盘频繁写入
         now = time.time()*1000.0
         if (now - self._last_save_ts) < self._save_min_interval_ms:
-            self.statusbar.showMessage('保存过于频繁，已忽略')
+            self.statusbar.showMessage(L('保存过于频繁，已忽略','Save too frequent, ignored'))
             return
         self._last_save_ts = now
         if (not self._current_pipeline_path) or (os.path.basename(self._current_pipeline_path).lower() == 'sample.json'):
@@ -458,10 +533,10 @@ class MainWindow(QMainWindow):
             return
         ok = self.flow_canvas.save_to_file(self._current_pipeline_path)
         if ok:
-            self.statusbar.showMessage(f'保存成功: {self._current_pipeline_path}')
+            self.statusbar.showMessage(L('保存成功:','Saved:')+f' {self._current_pipeline_path}')
             self._persist_last_project(self._current_pipeline_path)
         else:
-            self.statusbar.showMessage('保存失败')
+            self.statusbar.showMessage(L('保存失败','Save failed'))
         
     def _save_project_as(self):
         # 为首次保存提供一个默认建议文件名而不是 sample.json
@@ -480,27 +555,27 @@ class MainWindow(QMainWindow):
             self._current_pipeline_path = path
             self._last_save_ts = time.time()*1000.0  # 更新节流时间戳
             self._persist_last_project(path)
-        self.statusbar.showMessage('另存为成功' if ok else '另存为失败')
+        self.statusbar.showMessage(L('另存为成功','Save As success') if ok else L('另存为失败','Save As failed'))
         
     def _undo(self):
         self.flow_canvas.undo()
-        self.statusbar.showMessage('撤销完成')
+        self.statusbar.showMessage(L('撤销完成','Undo done'))
         
     def _redo(self):
         self.flow_canvas.redo()
-        self.statusbar.showMessage('重做完成')
+        self.statusbar.showMessage(L('重做完成','Redo done'))
         
     def _copy(self):
         self.flow_canvas.copy_selection()
-        self.statusbar.showMessage('已复制')
+        self.statusbar.showMessage(L('已复制','Copied'))
         
     def _paste(self):
         self.flow_canvas.paste_selection()
-        self.statusbar.showMessage('已粘贴')
+        self.statusbar.showMessage(L('已粘贴','Pasted'))
         
     def _delete(self):
         self.flow_canvas.delete_selection()
-        self.statusbar.showMessage('已删除')
+        self.statusbar.showMessage(L('已删除','Deleted'))
     
     def _duplicate_selection(self):
         self.flow_canvas.duplicate_selection()
@@ -509,7 +584,7 @@ class MainWindow(QMainWindow):
     def _apply_properties(self):
         if hasattr(self.property_panel, 'apply_current'):
             self.property_panel.apply_current()
-            self.statusbar.showMessage('属性已应用')
+            self.statusbar.showMessage(L('属性已应用','Properties applied'))
     
     def _on_canvas_module_selected(self, module_item):
         """当画布选中模块时刷新右侧属性面板"""
@@ -919,6 +994,9 @@ class MainWindow(QMainWindow):
                 run_ms = data.get('run_interval_ms')
                 if isinstance(run_ms, (int, float)) and 50 <= run_ms <= 10000:
                     self._feeder_interval_sec = max(0.05, run_ms/1000.0)
+                lang = data.get('language_mode')
+                if isinstance(lang, str) and lang in ('zh','en','both'):
+                    set_language_mode(lang)
         except Exception as e:
             # 读取失败忽略，保持默认
             print(f"加载用户设置失败: {e}")
@@ -928,6 +1006,7 @@ class MainWindow(QMainWindow):
         try:
             data = {
                 'run_interval_ms': int(self._feeder_interval_sec * 1000),
+                'language_mode': get_language_mode(),
                 'ts': time.time()
             }
             with open(self._settings_path, 'w', encoding='utf-8') as f:
@@ -935,6 +1014,14 @@ class MainWindow(QMainWindow):
         except Exception as e:
             if hasattr(self, 'statusbar'):
                 self.statusbar.showMessage(f'保存设置失败: {e}', 3000)
+
+    def _translate_module_type(self, module_type: str) -> str:
+        # 当前简单使用 translate; 将来可针对模块别名单独表
+        try:
+            from app.utils.i18n import translate as _t
+            return _t(module_type)
+        except Exception:
+            return module_type
 
     def _restore_window_state(self):
         """恢复窗口几何和停靠布局 (若之前保存)."""

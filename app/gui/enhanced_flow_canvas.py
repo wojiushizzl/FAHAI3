@@ -994,6 +994,17 @@ class EnhancedFlowCanvas(QGraphicsView):
         from app.pipeline.module_registry import list_registered_modules, get_module_class
         from app.pipeline.base_module import ModuleType
         menu = QMenu(self)
+        # 语言辅助
+        try:
+            from app.utils.i18n import get_language_mode
+            def L(cn: str, en: str):
+                mode = get_language_mode()
+                if mode == 'zh': return cn
+                if mode == 'en': return en
+                return f"{cn} {en}"
+        except Exception:
+            def L(cn: str, en: str):
+                return cn
         # 新分类映射 (名称/前缀模式归类): 输入 / 模型 / 显示 / 存储 / 协议 / 脚本 / 逻辑 / 其它
         groups = {'输入': [], '模型': [], '显示': [], '存储': [], '协议': [], '脚本': [], '逻辑': [], '其它': []}
         names = list_registered_modules()
@@ -1024,33 +1035,43 @@ class EnhancedFlowCanvas(QGraphicsView):
         for g, items in groups.items():
             if not items:
                 continue
-            sub = menu.addMenu(g)
+            # 分类标题双语
+            sub = menu.addMenu({
+                '输入': L('输入','Input'),
+                '模型': L('模型','Model'),
+                '显示': L('显示','Display'),
+                '存储': L('存储','Storage'),
+                '协议': L('协议','Protocol'),
+                '脚本': L('脚本','Script'),
+                '逻辑': L('逻辑','Logic'),
+                '其它': L('其它','Other')
+            }[g])
             for it in sorted(items):
                 act = QAction(it, self)
                 act.triggered.connect(lambda checked, t=it: self.add_module(t))
                 sub.addAction(act)
         menu.addSeparator()
-        copy_act = QAction("复制", self); copy_act.triggered.connect(self.copy_selection)
-        paste_act = QAction("粘贴", self); paste_act.triggered.connect(self.paste_selection)
-        del_act = QAction("删除", self); del_act.triggered.connect(self.delete_selection)
-        undo_act = QAction("撤销", self); undo_act.triggered.connect(self.undo)
-        redo_act = QAction("重做", self); redo_act.triggered.connect(self.redo)
+        copy_act = QAction(L("复制","Copy"), self); copy_act.triggered.connect(self.copy_selection)
+        paste_act = QAction(L("粘贴","Paste"), self); paste_act.triggered.connect(self.paste_selection)
+        del_act = QAction(L("删除","Delete"), self); del_act.triggered.connect(self.delete_selection)
+        undo_act = QAction(L("撤销","Undo"), self); undo_act.triggered.connect(self.undo)
+        redo_act = QAction(L("重做","Redo"), self); redo_act.triggered.connect(self.redo)
         menu.addActions([copy_act, paste_act, del_act, undo_act, redo_act])
         menu.addSeparator()
-        clear_act = QAction("清空画布", self); clear_act.triggered.connect(self.clear)
+        clear_act = QAction(L("清空画布","Clear Canvas"), self); clear_act.triggered.connect(self.clear)
         menu.addAction(clear_act)
         # 分组相关：若选择了多个模块，提供创建分组
         sel_modules = [it for it in self.scene.selectedItems() if isinstance(it, ModuleItem)]
         if len(sel_modules) >= 2:
-            group_act = QAction("创建分组", self)
+            group_act = QAction(L("创建分组","Create Group"), self)
             group_act.triggered.connect(lambda: self._create_group_from_selection(sel_modules))
             menu.addAction(group_act)
         # 分组单选操作：重命名 / 删除
         sel_groups = [it for it in self.scene.selectedItems() if isinstance(it, GroupBoxItem)]
         if len(sel_groups) == 1:
             g = sel_groups[0]
-            rename_act = QAction("重命名分组", self); rename_act.triggered.connect(lambda: self._rename_group(g))
-            del_act = QAction("删除分组", self); del_act.triggered.connect(lambda: self._delete_group(g))
+            rename_act = QAction(L("重命名分组","Rename Group"), self); rename_act.triggered.connect(lambda: self._rename_group(g))
+            del_act = QAction(L("删除分组","Delete Group"), self); del_act.triggered.connect(lambda: self._delete_group(g))
             menu.addAction(rename_act); menu.addAction(del_act)
         menu.exec(event.globalPos())
 
