@@ -11,7 +11,7 @@ from PyQt6.QtGui import QDrag, QPixmap, QIcon, QPainter, QShortcut, QKeySequence
 from app.pipeline.module_registry import list_registered_modules, get_module_class
 from app.pipeline.base_module import ModuleType
 from app.pipeline.utility.category_utils import classify_module
-from app.utils.i18n import bilingual, translate, get_language_mode
+from app.utils.i18n import bilingual, translate, get_language_mode, L
 
 
 class ModuleToolbox(QWidget):
@@ -29,7 +29,8 @@ class ModuleToolbox(QWidget):
         self.setSizePolicy(sp)
         self.setMinimumWidth(180)
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("搜索模块 (Ctrl+F)...")
+        # Placeholder bilingual per mode
+        self._update_search_placeholder()
         self.search_box.textChanged.connect(self._filter_tree)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
@@ -39,7 +40,7 @@ class ModuleToolbox(QWidget):
         self.tree.viewport().setAcceptDrops(False)
         self.tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
         layout = QVBoxLayout(self)
-        title = QLabel("模块工具箱")
+        title = QLabel(L("模块工具箱", "Module Toolbox"))
         title.setStyleSheet("""QLabel {font-weight:bold;font-size:14px;padding:6px;background:#f0f0f0;border-bottom:1px solid #ccc;}""")
         # 让树控件获得垂直伸展空间: 使用 stretch=1
         self.tree.setSizePolicy(sp.horizontalPolicy(), QSizePolicy.Policy.Expanding)
@@ -51,6 +52,15 @@ class ModuleToolbox(QWidget):
         QShortcut(QKeySequence("Return"), self, activated=self._add_selected_via_enter)
         QShortcut(QKeySequence("Ctrl+R"), self, activated=self.refresh_modules)
         self.refresh_modules()
+
+    def _update_search_placeholder(self):
+        mode = get_language_mode()
+        if mode == 'zh':
+            self.search_box.setPlaceholderText("搜索模块 (Ctrl+F)...")
+        elif mode == 'en':
+            self.search_box.setPlaceholderText("Search modules (Ctrl+F)...")
+        else:
+            self.search_box.setPlaceholderText("搜索/搜索 Search modules (Ctrl+F)...")
 
     def refresh_modules(self):
         """刷新模块树，按新分类体系分组: 输入 / 模型 / 显示 / 存储 / 协议 / 脚本 / 逻辑 / 其它

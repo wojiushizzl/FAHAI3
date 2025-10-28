@@ -17,6 +17,7 @@ import json, os
 from app.gui.connection_graphics import BetterConnectionLine
 from app.pipeline.module_registry import get_module_class
 from app.pipeline.pipeline_executor import PipelineExecutor
+from app.utils.i18n import get_language_mode, bilingual, translate
 
 DEBUG_GUI = False  # 全局调试开关: 设为 True 可恢复 [DEBUG] 打印
 
@@ -37,7 +38,8 @@ class ModuleItem(QGraphicsRectItem):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)  # 用于尺寸调整与光标反馈
-        self.text_item = QGraphicsTextItem(module_type, self)
+        # 标题使用当前语言模式的翻译（中/英/双语）
+        self.text_item = QGraphicsTextItem(self._translated_title(module_type), self)
         self.text_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         self.text_item.setPos(0, 4)  # will center after ports created
         if input_ports is None:
@@ -142,6 +144,24 @@ class ModuleItem(QGraphicsRectItem):
             # 四舍五入避免模糊
             cx = int(round(cx))
             self.text_item.setPos(cx, 4)
+        except Exception:
+            pass
+
+    def _translated_title(self, raw: str) -> str:
+        """根据当前语言模式返回模块标题显示文本。"""
+        mode = get_language_mode()
+        if mode == 'zh':
+            return raw
+        if mode == 'en':
+            return translate(raw)
+        return bilingual(raw)
+
+    def refresh_title_language(self):
+        """在语言切换时由外部调用刷新标题文本。"""
+        try:
+            self.text_item.setPlainText(self._translated_title(self.module_type))
+            if hasattr(self, '_center_title'):
+                self._center_title()
         except Exception:
             pass
 

@@ -5,6 +5,7 @@
 提供模块类的集中注册与查找，支持GUI动态端口反射。
 """
 from typing import Dict, Type, Optional, List
+from app.utils.i18n import translate, bilingual, get_language_mode
 from .base_module import BaseModule
 import logging
 try:
@@ -31,6 +32,21 @@ def get_module_class(display_name: str) -> Optional[Type[BaseModule]]:
 
 def list_registered_modules() -> List[str]:
     return list(_module_registry.keys())
+
+def list_registered_modules_display() -> List[str]:
+    """Return module names adapted to current language mode (for non-GUI consumers).
+    GUI toolbox already handles bilingual; this is for any dynamic listings needing translation.
+    """
+    mode = get_language_mode()
+    names = []
+    for raw in _module_registry.keys():
+        if mode == 'zh':
+            names.append(raw)
+        elif mode == 'en':
+            names.append(translate(raw))
+        else:
+            names.append(bilingual(raw))
+    return names
 
 def load_plugin_modules(group: str = "fahai.modules") -> List[str]:
     """通过 entry points 加载外部插件模块。

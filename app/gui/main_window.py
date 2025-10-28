@@ -316,7 +316,11 @@ class MainWindow(QMainWindow):
                     try:
                         if hasattr(self.flow_canvas, 'modules'):
                             for m in getattr(self.flow_canvas, 'modules', []):
-                                if hasattr(m,'text_item') and hasattr(m,'module_type'):
+                                # 使用新的标题刷新方法以保证居中与翻译一致
+                                if hasattr(m, 'refresh_title_language'):
+                                    m.refresh_title_language()
+                                elif hasattr(m,'text_item') and hasattr(m,'module_type'):
+                                    # 回退逻辑
                                     m.text_item.setPlainText(self._translate_module_type(m.module_type))
                                     if hasattr(m,'_center_title'):
                                         m._center_title()
