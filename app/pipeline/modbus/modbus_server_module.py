@@ -84,6 +84,8 @@ class ModbusServerModule(BaseModule):
         # 输入: 可选写入线圈/保持寄存器
         self.register_input_port("coil_values", port_type="list", desc="覆盖写入全部线圈值")
         self.register_input_port("holding_values", port_type="list", desc="覆盖写入全部保持寄存器值")
+        # 新增启停控制：True=启动(若未启动) / False=关闭(若已启动)。未连接时由 auto_start 控制
+        self.register_input_port("enable", port_type="bool", desc="启用/关闭服务器 (未连接则使用 auto_start)")
         # 输出
         self.register_output_port("host", port_type="str", desc="服务器地址")
         self.register_output_port("port", port_type="int", desc="服务器端口")
@@ -91,6 +93,7 @@ class ModbusServerModule(BaseModule):
         self.register_output_port("status", port_type="bool", desc="运行状态")
         self.register_output_port("coils", port_type="list", desc="线圈快照")
         self.register_output_port("holdings", port_type="list", desc="保持寄存器快照")
+        self.register_output_port("started_once", port_type="bool", desc="是否曾成功启动过")
 
     def _make_context(self):
         coil_count = int(self.config.get("coil_count", 64))
@@ -156,8 +159,24 @@ class ModbusServerModule(BaseModule):
         self._thread = None
 
     def process(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        # 每周期更新寄存器
+        # 启停控制：优先输入端口 enable，其次配置 auto_start
+        want_enable = inputs.get('enable')
+        if want_enable is None:
+            want_enable = bool(self.config.get('auto_start', True))
+        else:
+            # 允许字符串/数字转换
+            if isinstance(want_enable, str):
+                want_enable = want_enable.strip().lower() in ('1','true','yes','on','start','enable')
+            else:
+                want_enable = bool(want_enable)
         running = bool(self._server)
+        # 根据期望状态执行一次启停（不重复重启）
+        if want_enable and not running:
+            self._on_start()
+            running = bool(self._server)
+        elif (not want_enable) and running:
+            self._on_stop()
+            running = False
         if running and self._context:
             try:
                 slave = self._context[0] if hasattr(self._context, '__getitem__') else None
@@ -203,7 +222,8 @@ class ModbusServerModule(BaseModule):
             'context': self._context,
             'status': running,
             'coils': list(self._coils_cache),
-            'holdings': list(self._holdings_cache)
+            'holdings': list(self._holdings_cache),
+            'started_once': bool(self._thread)  # 若线程曾创建则表示启动过
         }
 
     def configure(self, config: Dict[str, Any]) -> bool:

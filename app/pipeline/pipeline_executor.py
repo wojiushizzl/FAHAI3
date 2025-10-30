@@ -123,7 +123,9 @@ class PipelineExecutor:
             "retry_count": 3,           # 重试次数
             "retry_delay": 1.0,         # 重试延迟
             "enable_monitoring": True,   # 启用监控
-            "log_level": "INFO"
+            "log_level": "INFO",
+            "allow_idle_tick": True,     # 无输入时是否仍然空转执行一次周期 (用于轮询型源模块)
+            "idle_tick_interval": 0.1    # 空转轮询间隔秒
         }
         
         # 设置日志
@@ -528,9 +530,12 @@ class PipelineExecutor:
                     
                 # 获取输入数据
                 try:
-                    input_data = self.input_queue.get(timeout=0.1)
+                    input_data = self.input_queue.get(timeout=self.config.get("idle_tick_interval", 0.1))
                 except queue.Empty:
-                    continue
+                    if self.config.get("allow_idle_tick", True):
+                        input_data = {}  # 空输入触发一次轮询
+                    else:
+                        continue
                     
                 # 执行流程
                 start_time = time.time()
@@ -572,6 +577,9 @@ class PipelineExecutor:
         其它保持顺序，避免破坏依赖与界面高亮节奏。
         """
         current_data = input_data.copy()
+        # 每个周期重置闸门跳过集合，确保布尔闸门按最新 flag 重新评估 (run_once 中是局部变量)
+        if hasattr(self, '_gate_skip_cache'):
+            self._gate_skip_cache = set()
         adaptive = bool(self.config.get('adaptive_parallel', False))
         if not adaptive:
             # 原始逻辑

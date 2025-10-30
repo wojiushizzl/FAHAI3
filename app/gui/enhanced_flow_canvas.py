@@ -1469,16 +1469,135 @@ class EnhancedFlowCanvas(QGraphicsView):
     def duplicate_selection(self):
         if self._locked:
             return
-        """复制并立即粘贴选中模块，偏移更小便于连续操作"""
+        """高级复制: 复制选中模块的
+        - 位置(统一偏移)
+        - 尺寸 (width/height)
+        - 配置与自定义状态(config, state)
+        - 选中集合内部的连接关系
+
+        实现方式: 构造一个最小结构数据 (modules+connections) 然后重建。
+        """
         sel = [it for it in self.scene.selectedItems() if isinstance(it, ModuleItem)]
         if not sel:
             return
-        temp_clip = []
+        # 预先记录当前状态快照，确保撤销回到复制前而不是更早的空画布
+        try:
+            if not self._suppress_history:
+                self._record_history()
+        except Exception:
+            pass
+        # 建立集合方便快速判断内部连接
+        sel_set = set(sel)
+        # 收集模块数据
+        modules_payload = []
         for m in sel:
-            temp_clip.append({'module_type': m.module_type,'x': m.scenePos().x(),'y': m.scenePos().y()})
-        for m in temp_clip:
-            self.add_module_at(m['module_type'], QPointF(m['x']+20, m['y']+20))
+            cfg = {}
+            if m.module_ref and isinstance(m.module_ref.config, dict):
+                try:
+                    cfg = m.module_ref.config.copy()
+                except Exception:
+                    cfg = {}
+            state = {}
+            try:
+                state = self._collect_module_state(m)
+            except Exception:
+                pass
+            modules_payload.append({
+                'module_type': m.module_type,
+                'x': m.scenePos().x(),
+                'y': m.scenePos().y(),
+                'width': m.rect().width(),
+                'height': m.rect().height(),
+                'inputs': getattr(m, 'input_ports_def', None),
+                'outputs': getattr(m, 'output_ports_def', None),
+                'config': cfg,
+                'state': state
+            })
+        # 收集内部连接（双端都在选中集合中）
+        internal_links = []
+        for line, sp, ep in self.connections:
+            if sp.parent_item in sel_set and ep.parent_item in sel_set:
+                internal_links.append({
+                    'source_module': sp.parent_item.module_id,
+                    'source_port': sp.port_name,
+                    'target_module': ep.parent_item.module_id,
+                    'target_port': ep.port_name
+                })
+        # 构建旧 id -> 模块引用（用于潜在扩展：复制外部连线时参考）
+        old_id_map = {m.module_id: m for m in sel}
+        new_items: list[ModuleItem] = []
+        # 抑制历史记录，批量创建
+        self._suppress_history = True
+        offset = QPointF(20, 20)
+        from app.pipeline.module_registry import get_module_class
+        for mp in modules_payload:
+            mtype = mp['module_type']
+            cls = get_module_class(mtype)
+            module_ref = None
+            if cls:
+                try:
+                    module_ref = cls(name=mtype)
+                    cfg = mp.get('config') or {}
+                    if cfg:
+                        try:
+                            module_ref.configure(cfg)
+                        except Exception:
+                            pass
+                    # 应用状态（与 load_from_file 相同策略）
+                    st = mp.get('state') or {}
+                    try:
+                        if 'text_value' in st and hasattr(module_ref, 'text_value'):
+                            module_ref.text_value = st['text_value']
+                        if 'last_text' in st and hasattr(module_ref, 'last_text'):
+                            module_ref.last_text = st['last_text']
+                    except Exception:
+                        pass
+                except Exception as e:
+                    print(f"复制时实例化模块失败 {mtype}: {e}")
+            # 创建模块图形项（带宽高）
+            x = mp['x'] + offset.x()
+            y = mp['y'] + offset.y()
+            w = mp['width']; h = mp['height']
+            item = ModuleItem(mtype, x, y, width=w, height=h, canvas=self,
+                              module_ref=module_ref,
+                              input_ports=mp.get('inputs'), output_ports=mp.get('outputs'))
+            self.scene.addItem(item)
+            self.modules.append(item)
+            new_items.append(item)
+        # 由于新 module_id 是新生成的，需要建立旧 -> 新匹配：通过顺序对应（假设 module_id 自动生成不同值）
+        # 改用基于模块类型+原坐标匹配更加可靠
+        resolved_map = {}
+        for orig in sel:
+            ox = orig.scenePos().x(); oy = orig.scenePos().y(); mtype = orig.module_type
+            candidate = next((m for m in new_items if m.module_type == mtype and abs(m.scenePos().x() - (ox+offset.x())) < 0.1 and abs(m.scenePos().y() - (oy+offset.y())) < 0.1), None)
+            if candidate:
+                resolved_map[orig.module_id] = candidate
+        # 重建内部连接
+        from app.gui.connection_graphics import BetterConnectionLine
+        for link in internal_links:
+            sid = link['source_module']; tid = link['target_module']
+            s_item = resolved_map.get(sid); t_item = resolved_map.get(tid)
+            if not s_item or not t_item:
+                continue
+            sp = next((p for p in s_item.output_points if p.port_name == link['source_port']), None)
+            tp = next((p for p in t_item.input_points if p.port_name == link['target_port']), None)
+            if not sp or not tp:
+                continue
+            line = BetterConnectionLine(sp, tp, canvas=self, temp=False)
+            self.scene.addItem(line)
+            sp.connections.append(line)
+            tp.connections.append(line)
+            self.connections.append((line, sp, tp))
+        self._suppress_history = False
         self._record_history()
+        # 更新选择：仅选中新复制的模块
+        try:
+            for m in self.modules:
+                m.setSelected(False)
+            for m in new_items:
+                m.setSelected(True)
+        except Exception:
+            pass
 
     def delete_selection(self):
         if self._locked:
@@ -1544,27 +1663,43 @@ class EnhancedFlowCanvas(QGraphicsView):
             self._restore_snapshot(self._history[self._history_index])
 
     def _restore_snapshot(self, data: Dict[str, Any]):
-        self.scene.clear()
-        self.modules.clear()
-        self.connections.clear()
+        # 完整恢复快照: 模块、配置、状态、尺寸、连接
+        self.scene.clear(); self.modules.clear(); self.connections.clear()
         id_map = {}
         self._suppress_history = True
+        from app.pipeline.module_registry import get_module_class
         for m in data.get('modules', []):
             mtype = m.get('module_type')
-            pos = QPointF(m.get('x',0), m.get('y',0))
-            self.add_module_at(mtype, pos)
-            item = self.modules[-1]
+            x = m.get('x',0); y = m.get('y',0)
+            w = m.get('width', 140); h = m.get('height', 80)
+            cls = get_module_class(mtype)
+            module_ref = None
+            if cls:
+                try:
+                    module_ref = cls(name=mtype)
+                    cfg = m.get('config') or {}
+                    if cfg:
+                        try: module_ref.configure(cfg)
+                        except Exception: pass
+                    state = m.get('state') or {}
+                    try:
+                        if 'text_value' in state and hasattr(module_ref, 'text_value'):
+                            module_ref.text_value = state['text_value']
+                        if 'last_text' in state and hasattr(module_ref, 'last_text'):
+                            module_ref.last_text = state['last_text']
+                    except Exception: pass
+                except Exception as e:
+                    print(f"恢复快照实例化失败 {mtype}: {e}")
+            item = ModuleItem(mtype, x, y, width=w, height=h, canvas=self,
+                              module_ref=module_ref,
+                              input_ports=m.get('inputs'), output_ports=m.get('outputs'))
+            self.scene.addItem(item)
+            self.modules.append(item)
             item.module_id = m.get('module_id', item.module_id)
             if item.module_ref:
                 item.module_ref.module_id = item.module_id
-            w = m.get('width'); h = m.get('height')
-            try:
-                if isinstance(w, (int,float)) and isinstance(h, (int,float)) and w>40 and h>40:
-                    item.setRect(0,0,float(w),float(h))
-                    item._relayout_ports()
-            except Exception:
-                pass
             id_map[item.module_id] = item
+        from app.gui.connection_graphics import BetterConnectionLine
         for c in data.get('connections', []):
             sid = c.get('source_module'); spt = c.get('source_port')
             tid = c.get('target_module'); tpt = c.get('target_port')
@@ -1577,8 +1712,7 @@ class EnhancedFlowCanvas(QGraphicsView):
                 continue
             line = BetterConnectionLine(sp, tp, canvas=self, temp=False)
             self.scene.addItem(line)
-            sp.connections.append(line)
-            tp.connections.append(line)
+            sp.connections.append(line); tp.connections.append(line)
             self.connections.append((line, sp, tp))
         self._suppress_history = False
 

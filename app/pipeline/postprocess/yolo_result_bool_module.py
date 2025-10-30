@@ -1,30 +1,38 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""检测结果布尔判断模块 (YoloResultBoolModule)
+"""检测结果布尔判断模块 / Detection Result Boolean Judge (YoloResultBoolModule)
 
-读取上游 YOLO 检测(或其它检测)输出的列表/结构, 判断是否包含目标关键字/类别, 输出布尔标志 flag。
+功能 / Purpose:
+    读取上游 YOLO 检测(或其它检测)输出的列表/结构, 判断是否包含目标关键字/类别, 输出布尔标志 flag。
+    Read upstream YOLO (or other) detection outputs and decide if any element matches target tokens.
 
-判定规则(尽量宽松):
-- 若元素为字符串: substr 匹配 (target in element)
-- 若元素为 dict: 依次检查键: name/label/class/category 以及所有字符串值是否包含 target
-- 若元素具备属性 name/label/class_name: 读取并匹配
-- 否则将元素转为字符串再匹配
-- 若 target 为空字符串: 只要结果非空即 True
+判定规则 / Matching Rules:
+    - 字符串: 使用 substring 包含匹配 (target in element)
+    - dict: 检查键 name/label/class/category/class_name 以及所有字符串值
+    - 对象: 若具备上述属性之一则读取并匹配; 否则转为字符串匹配
+    - target 为空: 结果非空即可 True
+    - 多 token (runtime 输入) 时: 任意一个 token 命中即可
 
-配置:
-- target: str  要匹配的子串 (默认 'x')
-- invert: bool  是否反转输出 (默认 False)
-- input_key: str 输入端口或输入字典中使用的键 (默认 'results')
+配置 / Config Fields:
+    - target: 默认匹配子串 (default 'x')
+    - invert: 是否反转最终结果 / invert final flag
+    - input_key: 输入中结果的键名 / key holding results
 
-输入端口:
-- results (泛型, list/tuple/any)
+新增运行时输入 / New Runtime Input:
+    - target_text: 运行时覆盖 target, 支持逗号/空格/分号分隔多个 token。
+        Overrides config target with comma/space/semi-colon separated tokens.
 
-输出端口:
-- flag (bool) 判定结果 (invert 后)
-- matched (bool) 未反转的原始匹配标志 (便于调试)
+输入端口 / Input Ports:
+    - results: 检测结果列表或结构 / detection result list or structure
+    - target_text: 动态匹配目标文本(覆盖配置) / dynamic target tokens overriding config
 
-说明:
-该模块不直接中断流程，如需根据 flag 中断，请连接到 布尔闸门 模块。
+输出端口 / Output Ports:
+    - flag: 最终布尔 (考虑 invert) / final bool (after invert)
+    - matched: 原始匹配 (未反转) / raw matched before invert
+
+说明 / Notes:
+    模块不直接中断流程，若需中断请连接布尔闸门模块。
+    This module does not itself gate execution; chain to BoolGateModule to skip branches.
 """
 from __future__ import annotations
 from typing import Dict, Any, Iterable
@@ -52,6 +60,13 @@ class YoloResultBoolModule(BaseModule):
         self.input_ports = {}
         self.output_ports = {}
         self.register_input_port('results', port_type='generic', desc='检测结果列表或结构', required=False)
+        # 新增动态目标文本输入: 若提供则覆盖 config.target, 支持逗号/空格/分号分隔多个 token
+        self.register_input_port(
+            'target_text',
+            port_type='text',
+            desc='动态匹配目标文本(覆盖配置) / runtime target tokens',
+            required=False
+        )
         self.register_output_port('flag', port_type='bool', desc='布尔判定输出')
         self.register_output_port('matched', port_type='bool', desc='原始匹配(未反转)')
 
@@ -63,21 +78,43 @@ class YoloResultBoolModule(BaseModule):
     def process(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         cfg = self.config
         target = str(cfg.get('target', 'x'))
+        # 若存在运行时输入 target_text 则覆盖配置 target
+        runtime_target_text = inputs.get('target_text')
+        runtime_tokens: list[str] = []
+        if isinstance(runtime_target_text, str) and runtime_target_text.strip():
+            # 允许逗号/分号/空格分隔
+            for part in runtime_target_text.replace(';', ' ').split(','):
+                for tok in part.split():
+                    t = tok.strip()
+                    if t:
+                        runtime_tokens.append(t)
+            if runtime_tokens:
+                # 多 token 时只要任意一个匹配即视为 matched
+                target_tokens = runtime_tokens
+            else:
+                target_tokens = [target]
+        else:
+            target_tokens = [target]
         input_key = cfg.get('input_key', 'results')
         invert = bool(cfg.get('invert', False))
 
         data = inputs.get(input_key)
         matched = False
         if data is not None:
-            matched = self._match_any(data, target)
-            if target == '':  # 空 target: 只要有数据
-                try:
-                    if isinstance(data, (list, tuple, set, dict)):
-                        matched = len(data) > 0
-                    else:
-                        matched = True  # 任意非 None 即 True
-                except Exception:
+            # 多 token 匹配: 任意一个命中视为 True；空字符串 token 特殊: 只要有数据即 True
+            for tk in target_tokens:
+                single_match = self._match_any(data, tk)
+                if tk == '':  # 空 token: 有数据即可
+                    try:
+                        if isinstance(data, (list, tuple, set, dict)):
+                            single_match = len(data) > 0
+                        else:
+                            single_match = True
+                    except Exception:
+                        single_match = True
+                if single_match:
                     matched = True
+                    break
         flag = (not matched) if invert else matched
         return {'flag': flag, 'matched': matched}
 

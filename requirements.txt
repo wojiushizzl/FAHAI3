@@ -1,7 +1,7 @@
 PyQt6
 opencv-python
 numpy
-pymodbus
+pymodbus==3.6.9
 pytest
 pydantic>=1.10,<2.0
 ultralytics>=8.0.0
