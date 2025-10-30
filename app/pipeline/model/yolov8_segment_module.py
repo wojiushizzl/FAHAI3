@@ -94,6 +94,8 @@ class YoloV8SegmentModule(BaseModule):
         if not self.input_ports:
             self.register_input_port("image", port_type="frame", desc="输入图像", required=True)
             self.register_input_port("control", port_type="bool", desc="推理控制: False 跳过", required=False)
+            # targets: 文本/列表，动态类别过滤输入（存在即启用过滤）
+            self.register_input_port("targets", port_type="meta", desc="目标类别文本(逗号/空格分隔)", required=False)
         if not self.output_ports:
             self.register_output_port("image_raw", port_type="frame", desc="原始输入图像")
             self.register_output_port("image", port_type="frame", desc="标注后图像")
@@ -183,16 +185,51 @@ class YoloV8SegmentModule(BaseModule):
         max_det = int(self.config.get("max_det", 100))
         device = self._select_device()
         half = bool(self.config.get("half", False)) and device.startswith("cuda")
+        # 动态 targets 解析
+        dynamic_targets: List[str] = []
+        if "targets" in inputs and inputs.get("targets") is not None:
+            raw = inputs.get("targets")
+            try:
+                if isinstance(raw, str):
+                    txt = raw.strip()
+                    if txt.startswith("[") and txt.endswith("]"):
+                        import json as _json
+                        try:
+                            arr = _json.loads(txt)
+                            if isinstance(arr, (list, tuple)):
+                                dynamic_targets = [str(x).strip() for x in arr if str(x).strip()]
+                        except Exception:
+                            pass
+                    if not dynamic_targets:
+                        unify = txt.replace("，", ",").replace("\n", ",").replace("\r", ",")
+                        parts: List[str] = []
+                        for seg in unify.split(","):
+                            seg = seg.strip()
+                            if not seg: continue
+                            for sp in seg.split():
+                                if sp: parts.append(sp)
+                        dynamic_targets = parts
+                elif isinstance(raw, (list, tuple, set)):
+                    dynamic_targets = [str(x).strip() for x in raw if str(x).strip()]
+            except Exception:
+                dynamic_targets = []
+        filter_enabled = bool(self.config.get("enable_target_filter", False)) or bool(dynamic_targets)
         try:
             predict_kwargs: Dict[str, Any] = dict(source=arr, conf=conf, verbose=False, max_det=max_det,
                                                  device=device, half=half)
-            if bool(self.config.get("enable_target_filter", False)):
-                tnames = self.config.get("target_classes", []) or []
+            if filter_enabled:
+                tnames = dynamic_targets if dynamic_targets else (self.config.get("target_classes", []) or [])
                 if tnames and self._names:
                     name_to_idx = {str(v).lower(): k for k, v in self._names.items()}
                     mapped = []
                     for nm in tnames:
                         key = str(nm).strip().lower()
+                        if key.isdigit():
+                            try:
+                                mapped.append(int(key))
+                                continue
+                            except ValueError:
+                                pass
                         if key in name_to_idx:
                             mapped.append(int(name_to_idx[key]))
                     if mapped:
@@ -232,8 +269,8 @@ class YoloV8SegmentModule(BaseModule):
         except Exception as e:
             return {"status": f"parse-error: {e}"}
         # 目标过滤逻辑
-        if bool(self.config.get("enable_target_filter", False)):
-            target_list = self.config.get("target_classes", []) or []
+        if filter_enabled:
+            target_list = dynamic_targets if dynamic_targets else (self.config.get("target_classes", []) or [])
             norm_name_set = set()
             index_set = set()
             for t in target_list:
@@ -258,7 +295,7 @@ class YoloV8SegmentModule(BaseModule):
         # 标注图绘制（支持 annotate_filtered_only 仅绘制过滤后目标）
         annotated = arr
         try:
-            if bool(self.config.get("annotate_filtered_only", False)) and bool(self.config.get("enable_target_filter", False)):
+            if bool(self.config.get("annotate_filtered_only", False)) and filter_enabled:
                 # 当启用并存在过滤结果时裁剪 boxes + masks
                 if segs:
                     from copy import deepcopy

@@ -118,6 +118,8 @@ class YoloV8DetectModule(BaseModule):
             self.register_input_port("image", port_type="frame", desc="输入图像", required=True)
             # control: False 时跳过推理, 输出 status=skipped 控制下游
             self.register_input_port("control", port_type="bool", desc="推理控制: False 跳过", required=False)
+            # targets: 文本/列表形式的类别过滤输入(逗号/空格/换行/中文逗号分隔); 存在时本次推理动态启用过滤并覆盖配置 target_classes
+            self.register_input_port("targets", port_type="meta", desc="目标类别文本(逗号/空格分隔)", required=False)
         if not self.output_ports:
             self.register_output_port("image_raw", port_type="frame", desc="原始输入图像")
             self.register_output_port("image", port_type="frame", desc="标注后图像")
@@ -218,13 +220,49 @@ class YoloV8DetectModule(BaseModule):
         agnostic = bool(self.config.get("agnostic_nms", False))
         device = self._select_device()
         half = bool(self.config.get("half", False)) and device.startswith("cuda")
+        # 解析动态 targets 输入（若提供）
+        dynamic_targets: List[str] = []
+        if "targets" in inputs and inputs.get("targets") is not None:
+            raw = inputs.get("targets")
+            try:
+                if isinstance(raw, str):
+                    txt = raw.strip()
+                    # 支持 JSON 列表
+                    if txt.startswith("[") and txt.endswith("]"):
+                        import json as _json
+                        try:
+                            arr = _json.loads(txt)
+                            if isinstance(arr, (list, tuple)):
+                                dynamic_targets = [str(x).strip() for x in arr if str(x).strip()]
+                        except Exception:
+                            pass
+                    if not dynamic_targets:
+                        # 统一分隔符: 中文逗号 -> 英文逗号, 换行 -> 逗号
+                        unify = txt.replace("，", ",").replace("\n", ",").replace("\r", ",")
+                        # 同时允许空格分隔
+                        parts: List[str] = []
+                        for seg in unify.split(","):
+                            seg = seg.strip()
+                            if not seg:
+                                continue
+                            # 再按空白拆
+                            for sp in seg.split():
+                                if sp:
+                                    parts.append(sp)
+                        dynamic_targets = parts
+                elif isinstance(raw, (list, tuple, set)):
+                    dynamic_targets = [str(x).strip() for x in raw if str(x).strip()]
+            except Exception:
+                dynamic_targets = []
+        # 是否启用类别过滤: 配置启用 或 动态 targets 提供
+        filter_enabled = bool(self.config.get("enable_target_filter", False)) or bool(dynamic_targets)
         try:
             # ultralytics YOLO 调用
             predict_kwargs: Dict[str, Any] = dict(source=arr, conf=conf, verbose=False, max_det=max_det,
                                                  agnostic_nms=agnostic, device=device, half=half)
-            # 名称过滤映射：启用 enable_target_filter 时根据 target_classes 名称映射 indices（若提供）
-            if bool(self.config.get("enable_target_filter", False)):
-                tnames = self.config.get("target_classes", []) or []
+            # 名称过滤映射：启用过滤时根据 (动态targets 或 配置 target_classes) 映射 indices
+            if filter_enabled:
+                tnames = dynamic_targets if dynamic_targets else (self.config.get("target_classes", []) or [])
                 if tnames and self._names:
                     name_to_idx = {str(v).lower(): k for k, v in self._names.items()}
                     mapped = []
@@ -269,9 +307,9 @@ class YoloV8DetectModule(BaseModule):
                         })
         except Exception as e:
             return {"status": f"parse-error: {e}"}
-        # 目标过滤逻辑
-        if bool(self.config.get("enable_target_filter", False)):
-            target_list = self.config.get("target_classes", []) or []
+        # 目标过滤逻辑 (再次基于 detections 列表过滤，用于 annotate_filtered_only 及纯名称/数值混合)
+        if filter_enabled:
+            target_list = dynamic_targets if dynamic_targets else (self.config.get("target_classes", []) or [])
             norm_name_set = set()
             index_set = set()
             for t in target_list:
@@ -296,7 +334,7 @@ class YoloV8DetectModule(BaseModule):
         # 可视化标注
         annotated = arr
         try:
-            if bool(self.config.get("annotate_filtered_only", False)) and bool(self.config.get("enable_target_filter", False)):
+            if bool(self.config.get("annotate_filtered_only", False)) and filter_enabled:
                 # 构造一个仿 results 的临时对象，替换 boxes 为过滤后的集合
                 # ultralytics Results 对象不可直接简单修改, 这里采用重新绘制策略:
                 from copy import deepcopy
