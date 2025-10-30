@@ -166,6 +166,11 @@ try:
 except Exception:
     pass
 try:
+    from .custom.video_play_module import VideoPlayModule
+    register_module("视频播放", VideoPlayModule)
+except Exception:
+    pass
+try:
     from .display.print_display_module import PrintDisplayModule
     register_module("打印显示", PrintDisplayModule)
 except Exception:

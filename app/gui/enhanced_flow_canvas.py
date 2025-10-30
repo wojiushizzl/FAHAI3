@@ -53,8 +53,9 @@ class ModuleItem(QGraphicsRectItem):
         self.input_labels: List[QGraphicsTextItem] = []
         self.output_labels: List[QGraphicsTextItem] = []
 
-        # 图片展示支持（与旧 flow_canvas 一致）
-        self._is_image_viewer = (module_type == "图片展示")
+        # 图片 / 视频展示支持
+        self._is_video_player = (module_type == "视频播放")
+        self._is_image_viewer = (module_type in ("图片展示", "视频播放", "相机", "摄像头"))
         self._thumb_item = None
         if self._is_image_viewer:
             from PyQt6.QtWidgets import QGraphicsPixmapItem
@@ -421,15 +422,29 @@ class ModuleItem(QGraphicsRectItem):
             self._thumb_item.setPixmap(QPixmap.fromImage(placeholder))
 
     def mouseDoubleClickEvent(self, event):
-        if self._is_image_viewer and self.module_ref:
+        if self._is_video_player and self.module_ref:
+            # 视频播放：双击暂停/恢复
+            meta = self.module_ref.outputs.get('meta') or {}
+            if meta.get('paused', False):
+                self.module_ref.receive_inputs({'control': {'action': 'resume'}})
+            else:
+                self.module_ref.receive_inputs({'control': {'action': 'pause'}})
+            try:
+                self.module_ref.run_cycle()
+            except Exception:
+                pass
+            self.refresh_visual()
+        elif self._is_image_viewer and self.module_ref:
+            # 图片展示：双击切换尺寸
             cur_w = int(self.module_ref.config.get("width", 160))
-            # 根据当前配置切换预设尺寸，并同步更新矩形大小以立即反映缩略图变化
             if cur_w <= 160:
                 new_w, new_h = 320, 240
             else:
                 new_w, new_h = 160, 120
-            self.module_ref.configure({"width": new_w, "height": new_h})
-            # 画布矩形含标题与边距：宽度加 16， 高度加 34
+            try:
+                self.module_ref.configure({"width": new_w, "height": new_h})
+            except Exception:
+                pass
             self.setRect(0, 0, new_w + 16, new_h + 34)
             self._relayout_ports()
             self.refresh_visual()
@@ -452,6 +467,51 @@ class ModuleItem(QGraphicsRectItem):
                 except Exception as e:
                     print(f"[路径选择器] 设置路径失败: {e}")
         super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        """模块项右键菜单: 视频播放控制 / 简易操作"""
+        menu = QMenu()
+        act_refresh = QAction("刷新", menu)
+        act_refresh.triggered.connect(lambda: self.refresh_visual())
+        menu.addAction(act_refresh)
+        if self._is_video_player and self.module_ref:
+            menu.addSeparator()
+            meta = self.module_ref.outputs.get('meta') or {}
+            paused = meta.get('paused', False)
+            act_toggle = QAction("继续" if paused else "暂停", menu)
+            def _toggle():
+                self.module_ref.receive_inputs({'control': {'action': ('resume' if paused else 'pause')}})
+                try:
+                    self.module_ref.run_cycle()
+                except Exception:
+                    pass
+                self.refresh_visual()
+            act_toggle.triggered.connect(_toggle)
+            menu.addAction(act_toggle)
+            act_stop = QAction("停止", menu)
+            def _stop():
+                self.module_ref.receive_inputs({'control': {'action': 'stop'}})
+                try:
+                    self.module_ref.run_cycle()
+                except Exception:
+                    pass
+                self.refresh_visual()
+            act_stop.triggered.connect(_stop)
+            menu.addAction(act_stop)
+            speed_menu = QMenu("速度", menu)
+            for sp in [0.25, 0.5, 1.0, 1.5, 2.0]:
+                act_sp = QAction(f"x{sp}", speed_menu)
+                def _set_sp(v=sp):
+                    self.module_ref.receive_inputs({'control': {'speed': v}})
+                    try:
+                        self.module_ref.run_cycle()
+                    except Exception:
+                        pass
+                    self.refresh_visual()
+                act_sp.triggered.connect(_set_sp)
+                speed_menu.addAction(act_sp)
+            menu.addMenu(speed_menu)
+        menu.exec(event.screenPos())
 
     def hoverMoveEvent(self, event):
         pos = event.pos()
@@ -862,6 +922,11 @@ class EnhancedFlowCanvas(QGraphicsView):
         if cls:
             try:
                 module_ref = cls(name=module_type)
+                try:
+                    if module_type in ("视频播放", "相机", "摄像头") and hasattr(module_ref, 'start'):
+                        module_ref.start()
+                except Exception:
+                    pass
             except Exception as e:
                 print(f"创建模块实例失败: {module_type}: {e}")
         input_ports = list(module_ref.input_ports.keys()) if module_ref else None

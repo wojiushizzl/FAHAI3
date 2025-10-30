@@ -85,8 +85,15 @@ class CameraModule(BaseModule):
             "exposure": -1,
             "gain": -1,
             "auto_focus": True,
-            "format": "BGR"
+            "format": "BGR",
+            "target_fps": 30.0,
+            "drop_if_slow": True
         })
+        self._last_frame: Optional[np.ndarray] = None
+        self._last_ts: float = 0.0
+        self._frame_counter: int = 0
+        self._last_output_ts: float = 0.0
+        self._start_time: float = time.time()
 
     @property
     def module_type(self) -> ModuleType:
@@ -98,7 +105,7 @@ class CameraModule(BaseModule):
             self.register_input_port("config", port_type="control", desc="动态配置", required=False)
         if not self.output_ports:
             self.register_output_port("image", port_type="frame", desc="采集到的图像帧")
-            self.register_output_port("timestamp", port_type="meta", desc="帧采集时间戳")
+            self.register_output_port("meta", port_type="meta", desc="采集状态与时间戳")
 
     def _on_start(self):
         if not self._open_camera():
@@ -171,6 +178,8 @@ class CameraModule(BaseModule):
                 continue
             ts = time.time()
             processed = self._process_frame(frame)
+            self._last_frame = processed
+            self._last_ts = ts
             if self.frame_queue.full():
                 try:
                     self.frame_queue.get_nowait()
@@ -202,22 +211,44 @@ class CameraModule(BaseModule):
 
     def process(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         if not self.is_capturing:
-            return {"error": "相机未启动"}
-        try:
-            data = self.frame_queue.get_nowait()
-            # 使用后归还（图像 numpy 数组保持引用，仅复用字典容器）
-            image = data.get("image")
-            ts = data.get("timestamp")
-            fid = data.get("frame_id")
-            self.buffer_pool.release(data)
-            return {
-                "image": image,
-                "timestamp": ts,
-                "frame_id": fid,
-                "camera_id": self.camera_id
-            }
-        except Empty:
-            return {"error": "暂无图像数据"}
+            return {"meta": {"error": "not-started", "camera_id": self.camera_id}}
+        target_fps = float(self.config.get("target_fps", self.config.get("fps", 30)))
+        now = time.time()
+        min_interval = 1.0 / target_fps if target_fps > 0 else 0.0
+        allow_new = (now - self._last_output_ts) >= min_interval - 1e-4
+        image = None; ts_out = None; fid = None
+        if allow_new:
+            try:
+                data = self.frame_queue.get_nowait()
+                image = data.get("image")
+                ts_out = data.get("timestamp")
+                fid = data.get("frame_id")
+                self.buffer_pool.release(data)
+                self._last_output_ts = now
+                self._frame_counter += 1
+            except Empty:
+                image = self._last_frame
+                ts_out = self._last_ts
+        else:
+            # 节流周期内不输出新图像, 仅返回 meta (image 保留 None)
+            image = None
+            ts_out = self._last_ts
+        meta = {
+            "timestamp": ts_out,
+            "frame_id": fid,
+            "camera_id": self.camera_id,
+            "width": self.config.get("width"),
+            "height": self.config.get("height"),
+            "format": self.config.get("format"),
+            "fps_capture": self.config.get("fps"),
+            "target_fps": target_fps,
+            "output_fps_est": (self._frame_counter / max(now - self._start_time, 1e-3)),
+            "throttled": not allow_new,
+            "queue_size": self.frame_queue.qsize(),
+        }
+        if image is None:
+            return {"meta": meta}
+        return {"image": image, "meta": meta}
 
     def get_camera_info(self) -> Dict[str, Any]:
         if not self.camera or not self.camera.isOpened():

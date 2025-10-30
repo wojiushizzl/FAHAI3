@@ -110,8 +110,9 @@ class ModuleItem(QGraphicsRectItem):
         self.text_item = QGraphicsTextItem(module_type, self)
         self.text_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         self.text_item.setPos(8, 4)
-        # Image viewer support
-        self._is_image_viewer = (module_type == "图片展示")
+        # Image / video viewer support
+        self._is_video_player = (module_type == "视频播放")
+        self._is_image_viewer = (module_type in ("图片展示", "视频播放", "相机", "摄像头"))
         self._thumb_item = None
         if self._is_image_viewer:
             self._thumb_item = QGraphicsPixmapItem(self)
@@ -179,6 +180,12 @@ class ModuleItem(QGraphicsRectItem):
                 print(f"[DEBUG][{self.module_id}] refresh_visual -> {'image present' if now else 'no image'}")
             self._prev_has_img = now
         self._update_thumbnail(img)
+        # 视频播放专用: 根据 paused 改变边框颜色
+        if self._is_video_player:
+            meta = self.module_ref.outputs.get('meta') or {}
+            paused = meta.get('paused', False)
+            color = QColor(200, 80, 80) if paused else QColor(80, 180, 90)
+            self.setPen(QPen(color, 2))
 
     def _update_thumbnail(self, img):
         if not self._thumb_item:
@@ -240,6 +247,69 @@ class ModuleItem(QGraphicsRectItem):
                     print(f"[DEBUG][{self.module_id}] begin resize {w}x{h}")
                 event.accept(); return
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        # 双击视频播放模块: 暂停/恢复
+        if self._is_video_player and self.module_ref:
+            meta = self.module_ref.outputs.get('meta') or {}
+            if meta.get('paused', False):
+                self.module_ref.receive_inputs({'control': {'action': 'resume'}})
+            else:
+                self.module_ref.receive_inputs({'control': {'action': 'pause'}})
+            try:
+                self.module_ref.run_cycle()
+            except Exception:
+                pass
+            self.refresh_visual()
+        super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        """模块级右键菜单: 视频播放控制 + 基础操作"""
+        menu = QMenu()
+        # 通用操作
+        act_refresh = QAction("刷新", menu)
+        act_refresh.triggered.connect(lambda: self.refresh_visual())
+        menu.addAction(act_refresh)
+        # 仅视频播放模块的控制
+        if self._is_video_player and self.module_ref:
+            menu.addSeparator()
+            meta = self.module_ref.outputs.get('meta') or {}
+            paused = meta.get('paused', False)
+            act_pause_resume = QAction("继续" if paused else "暂停", menu)
+            def _do_toggle():
+                self.module_ref.receive_inputs({'control': {'action': ('resume' if paused else 'pause')}})
+                try:
+                    self.module_ref.run_cycle()
+                except Exception:
+                    pass
+                self.refresh_visual()
+            act_pause_resume.triggered.connect(_do_toggle)
+            menu.addAction(act_pause_resume)
+            act_stop = QAction("停止", menu)
+            def _do_stop():
+                self.module_ref.receive_inputs({'control': {'action': 'stop'}})
+                try:
+                    self.module_ref.run_cycle()
+                except Exception:
+                    pass
+                self.refresh_visual()
+            act_stop.triggered.connect(_do_stop)
+            menu.addAction(act_stop)
+            # 速度子菜单
+            speed_menu = QMenu("速度", menu)
+            for sp in [0.25, 0.5, 1.0, 1.5, 2.0]:
+                act_sp = QAction(f"x{sp}", speed_menu)
+                def _set_speed(v=sp):
+                    self.module_ref.receive_inputs({'control': {'speed': v}})
+                    try:
+                        self.module_ref.run_cycle()
+                    except Exception:
+                        pass
+                    self.refresh_visual()
+                act_sp.triggered.connect(_set_speed)
+                speed_menu.addAction(act_sp)
+            menu.addMenu(speed_menu)
+        menu.exec(event.screenPos())
 
     def mouseMoveEvent(self, event):
         if self._resizing:
@@ -308,6 +378,12 @@ class FlowCanvas(QGraphicsView):
         if cls:
             try:
                 module_ref = cls(name=module_type)
+                # 自动启动视频播放与相机类模块
+                try:
+                    if module_type in ("视频播放", "相机", "摄像头") and hasattr(module_ref, 'start'):
+                        module_ref.start()
+                except Exception:
+                    pass
             except Exception as e:
                 print(f"创建模块实例失败: {module_type}: {e}")
         ins = list(module_ref.input_ports.keys()) if module_ref else None

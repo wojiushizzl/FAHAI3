@@ -105,6 +105,30 @@ python main.py
 | 图片展示 | 自动缩放/保持比例，双击可在预设尺寸间切换。 |
 | 打印显示 | 多行缓冲/时间戳/字典合并/截断/自适应高度。 |
 | OK/NOK展示 | 根据 `flag`（True/False/None）动态背景颜色与自定义字体大小。 |
+| 视频播放 | 从视频文件或摄像头读取并播放，支持暂停/恢复/循环/跳转/速度倍率/格式转换。 |
+
+### 视频播放模块配置示例
+```python
+video_mod.configure({
+  'source_type': 'file',      # 'file' 或 'camera'
+  'path': 'demo.mp4',         # 文件路径 (source_type=file)
+  'loop': True,               # 结尾循环
+  'target_fps': 30.0,         # 输出节流 FPS
+  'resize_width': 0,          # 0 表示不缩放
+  'resize_height': 0,
+  'convert_format': 'BGR',    # BGR|RGB|GRAY
+  'start_paused': False,
+  'speed': 1.0,               # 播放速度倍率
+})
+
+# 播放控制命令 (通过 control 端口输入字典)
+video_mod.receive_inputs({'control': {'action': 'pause'}})
+video_mod.receive_inputs({'control': {'action': 'resume'}})
+video_mod.receive_inputs({'control': {'seek': 150}})          # 跳转到第150帧(文件源)
+video_mod.receive_inputs({'control': {'speed': 2.0}})         # 2倍速播放
+video_mod.receive_inputs({'control': {'action': 'reload', 'path': 'new.mp4'}})
+```
+
 
 ## 8. 保存图片模块
 支持 once / interval / on_change / every 四模式；动态路径输入 (`path`) 可覆盖目录或指定完整文件；自动缩放与 JPG 质量控制。主要状态值：`saved` / `exists` / `skipped` / `no-image` / `write-fail` / `error:...`。
